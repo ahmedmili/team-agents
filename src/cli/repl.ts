@@ -5,6 +5,7 @@ import { formatPrompt, type Session } from "../core/session.js";
 import type { MemoryStore } from "../memory/store.js";
 import { handleCommand, type CommandContext } from "./commands.js";
 import { ReplRuntime } from "../core/runtime.js";
+import { formatErrorMessage } from "../utils/errors.js";
 
 export interface ReplDeps {
   session: Session;
@@ -72,9 +73,7 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
         for (const l of lines) console.log(l);
       }
     } catch (err) {
-      console.error(
-        chalk.red(err instanceof Error ? err.message : String(err)),
-      );
+      console.error(chalk.red(formatErrorMessage(err)));
     }
     loop();
   });

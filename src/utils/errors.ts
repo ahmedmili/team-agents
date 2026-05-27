@@ -35,3 +35,20 @@ export class LlmRateLimitError extends AiShellError {
     this.name = "LlmRateLimitError";
   }
 }
+
+/** Flatten Error.cause chains for CLI display. */
+export function formatErrorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+
+  const parts: string[] = [];
+  let current: unknown = err;
+  let depth = 0;
+
+  while (current instanceof Error && depth < 4) {
+    if (!parts.includes(current.message)) parts.push(current.message);
+    current = current.cause;
+    depth++;
+  }
+
+  return parts.join(" — ");
+}
