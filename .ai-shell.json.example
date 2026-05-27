@@ -1,0 +1,17 @@
+{
+  "projectName": "my-project",
+  "provider": "openai",
+  "models": {
+    "techLead": "gpt-4o-mini",
+    "backend": "gpt-4o-mini",
+    "qa": "gpt-4o-mini",
+    "architect": "gpt-4o-mini"
+  },
+  "agents": {
+    "karim": "backend",
+    "sara": "architect",
+    "alex": "qa",
+    "lead": "techLead"
+  },
+  "maxSteps": 5
+}

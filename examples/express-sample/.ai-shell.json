@@ -1,0 +1,9 @@
+{
+  "projectName": "express-sample",
+  "provider": "mock",
+  "agents": {
+    "karim": "backend",
+    "sara": "architect",
+    "alex": "qa"
+  }
+}
