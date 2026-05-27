@@ -5,7 +5,8 @@ Local-first, multi-agent engineering CLI. Enter a project with `ai connect` and 
 ## Requirements
 
 - Node.js 20+
-- Optional: `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for live models (defaults to **mock** provider when unset)
+- API/provider config in **`.ai-shell.json`** via `ai config` or REPL commands
+- Providers: OpenAI, Anthropic, Hugging Face, OpenRouter, experimental Puter proxy, and Mock fallback
 
 ## Install
 
@@ -44,10 +45,43 @@ Copy [`.ai-shell.json.example`](.ai-shell.json.example) to your project as `.ai-
 ```json
 {
   "projectName": "my-api",
-  "provider": "mock",
+  "provider": "openai",
+  "keys": {
+    "openai": "sk-your-key-here",
+    "anthropic": "sk-ant-your-key-here",
+    "huggingface": "hf-your-token-here",
+    "openrouter": "or-your-key-here"
+  },
   "models": {
-    "techLead": "gpt-4o-mini",
-    "backend": "gpt-4o-mini"
+    "openai": {
+      "techLead": "gpt-4o-mini",
+      "backend": "gpt-4o-mini"
+    },
+    "anthropic": {
+      "techLead": "claude-3-5-haiku-20241022",
+      "backend": "claude-3-5-haiku-20241022"
+    },
+    "huggingface": {
+      "techLead": "Qwen/Qwen2.5-7B-Instruct",
+      "backend": "Qwen/Qwen2.5-7B-Instruct"
+    },
+    "openrouter": {
+      "techLead": "openai/gpt-4o-mini",
+      "backend": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "adapterConfig": {
+    "openrouter": { "enabled": true, "baseUrl": "https://openrouter.ai/api/v1" },
+    "puter": {
+      "enabled": false,
+      "mode": "disabled",
+      "endpoint": "",
+      "sessionToken": ""
+    }
+  },
+  "agentProviders": {
+    "techLead": "openai",
+    "backend": "anthropic"
   },
   "agents": {
     "karim": "backend",
@@ -57,15 +91,81 @@ Copy [`.ai-shell.json.example`](.ai-shell.json.example) to your project as `.ai-
 }
 ```
 
-### Environment variables
+### API keys (two ways)
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `AI_SHELL_PROVIDER` | `openai`, `anthropic`, or `mock` |
-| `AI_SHELL_MODEL` | Default model |
-| `AI_SHELL_MAX_STEPS` | Orchestrator steps per message (default: 5) |
+**Option 1 — Edit `.ai-shell.json`** in your project root:
+
+```json
+"keys": {
+  "openai": "sk-...",
+  "anthropic": "sk-ant-...",
+  "huggingface": "hf-...",
+  "openrouter": "or-..."
+},
+"provider": "openai"
+```
+
+**Option 2 — CLI** (writes the same file):
+
+```bash
+ai config init
+ai config set-key openai sk-your-key-here
+ai config set-key huggingface hf-your-token-here
+ai config set-key openrouter or-your-key-here
+ai config set-provider openai
+ai config set-agent backend anthropic
+ai config keys
+ai config providers
+```
+
+Inside `ai connect`:
+
+```
+/setkey openai sk-your-key-here
+/setkey huggingface hf-your-token-here
+/setkey openrouter or-your-key-here
+/setprovider openai
+/use anthropic
+/setagent backend huggingface
+/keys
+/providers
+/dashboard
+/metrics
+/history messages
+```
+
+Do not commit real keys to git. Add `.ai-shell.json` to `.gitignore` if it contains secrets.
+
+### Provider matrix
+
+- **Native**: `openai`, `anthropic`, `huggingface`, `mock`
+- **Experimental adapters**: `openrouter`, `puter`
+  - `openrouter` needs `keys.openrouter`
+  - `puter` needs `adapterConfig.puter` with `enabled=true`, `mode=proxy`, `endpoint`, and `sessionToken`
+
+Fallback order when selected provider is unavailable: `huggingface` -> `openrouter` -> `puter` -> `openai` -> `anthropic` -> `mock`.
+
+## Dashboard and observability
+
+Launch web dashboard:
+
+```bash
+ai dashboard
+```
+
+Pages:
+- `/settings` for provider/key/agent-provider configuration
+- `/history` for sessions/messages/patches
+- `/observability` for runtime metrics and health
+
+Terminal observability:
+
+```bash
+ai metrics
+ai history --type sessions
+ai history --type messages
+ai history --type patches
+```
 
 ## Example project
 
@@ -106,4 +206,4 @@ See [project.md](project.md) for vision, agent schemas, and Phase 1 scope.
 - Diff-gated file writes (`/diff`, `/apply`, `/rollback`)
 - Repo scanner and stack detection
 - SQLite session memory (7-day resume)
-- OpenAI, Anthropic, and mock LLM providers
+- OpenAI, Anthropic, Hugging Face, OpenRouter, experimental Puter proxy, and mock providers

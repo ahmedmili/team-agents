@@ -4,7 +4,6 @@ import {
   type AgentOutput,
 } from "../schemas/index.js";
 import { BaseAgent, buildMessages, type AgentInput } from "./base.js";
-import type { LlmProvider } from "../llm/types.js";
 import type { AgentRole } from "../schemas/index.js";
 const SYSTEM = `You are the Tech Lead agent. Break user requests into actionable tasks for backend, qa, and architect agents.
 Output a concise plan with tasks. Do not write code or patches.`;
@@ -13,17 +12,13 @@ export class TechLeadAgent extends BaseAgent {
   readonly role: AgentRole = "techLead";
   readonly scope = getAgentScopes().techLead;
 
-  constructor(llm: LlmProvider, getModel: (role: AgentRole) => string) {
-    super(llm, getModel);
-  }
-
   async run(input: AgentInput): Promise<AgentOutput> {
     const messages = buildMessages(
       SYSTEM,
       "[OUTPUT_TYPE:plan]",
       input,
     );
-    const data = await this.llm.structured(
+    const data = await this.provider().structured(
       PlanOutputSchema,
       messages,
       this.model(),

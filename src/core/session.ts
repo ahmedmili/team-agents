@@ -1,5 +1,7 @@
+import fs from "fs-extra";
 import path from "node:path";
 import { simpleGit } from "simple-git";
+import { CONFIG_FILENAME } from "../config/store.js";
 import type { AiShellConfig } from "../config/types.js";
 import type { ProjectProfile, PatchRecord } from "../schemas/index.js";
 import type { MemoryStore, SessionRow } from "../memory/store.js";
@@ -8,7 +10,7 @@ import { loadConfig } from "../config/loader.js";
 
 export class Session {
   readonly root: string;
-  readonly config: AiShellConfig;
+  config: AiShellConfig;
   readonly row: SessionRow;
   profile: ProjectProfile;
   pendingTaskDescriptions: string[] = [];
@@ -53,12 +55,19 @@ export class Session {
 }
 
 async function findProjectRoot(start: string): Promise<string> {
-  const git = simpleGit(start);
+  const resolved = path.resolve(start);
+  if (
+    fs.existsSync(path.join(resolved, "package.json")) ||
+    fs.existsSync(path.join(resolved, CONFIG_FILENAME))
+  ) {
+    return resolved;
+  }
+  const git = simpleGit(resolved);
   if (await git.checkIsRepo()) {
     const top = await git.revparse(["--show-toplevel"]);
     return path.resolve(top.trim());
   }
-  return path.resolve(start);
+  return resolved;
 }
 
 export function formatPrompt(session: Session): string {

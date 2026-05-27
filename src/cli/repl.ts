@@ -1,48 +1,39 @@
 import readline from "node:readline";
 import chalk from "chalk";
 import { parseInput } from "../core/parser.js";
-import { Router } from "../core/router.js";
-import { Orchestrator } from "../core/orchestrator.js";
 import { formatPrompt, type Session } from "../core/session.js";
 import type { MemoryStore } from "../memory/store.js";
-import type { AgentRegistry } from "../agents/registry.js";
 import { handleCommand, type CommandContext } from "./commands.js";
+import { ReplRuntime } from "../core/runtime.js";
+
 export interface ReplDeps {
   session: Session;
   store: MemoryStore;
-  registry: AgentRegistry;
+  runtime: ReplRuntime;
 }
 
 export async function startRepl(deps: ReplDeps): Promise<void> {
-  const { session, store, registry } = deps;
-  const router = new Router(registry);
-  const orchestrator = new Orchestrator(session, registry, store);
+  const { session, store, runtime } = deps;
 
   let exiting = false;
   const ctx: CommandContext = {
     session,
     store,
-    registry,
+    get registry() {
+      return runtime.registry;
+    },
     onExit: () => {
       exiting = true;
     },
     onRefresh: async () => {
       await session.refreshProfile(store);
     },
+    onReloadConfig: () => {
+      runtime.reload();
+    },
   };
 
-  console.log(chalk.bold("\nAI Shell — connected"));
-  console.log(chalk.gray(`Root: ${session.root}`));
-  console.log(chalk.gray(`Stacks: ${session.profile.stacks.join(", ")}`));
-  console.log(chalk.gray(`Provider: ${session.config.provider}`));
-  if (session.config.provider === "mock") {
-    console.log(
-      chalk.yellow(
-        "Using mock LLM (set OPENAI_API_KEY or ANTHROPIC_API_KEY for live models).",
-      ),
-    );
-  }
-  console.log(chalk.gray("\nType /help for commands.\n"));
+  printBanner(session);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -76,8 +67,8 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
       } else if (input.kind === "natural" && !input.message) {
         // skip empty
       } else {
-        const route = router.route(input, session.profile);
-        const lines = await orchestrator.handleRoute(route);
+        const route = runtime.router.route(input, session.profile);
+        const lines = await runtime.orchestrator.handleRoute(route);
         for (const l of lines) console.log(l);
       }
     } catch (err) {
@@ -95,4 +86,20 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
   });
 
   loop();
+}
+
+function printBanner(session: Session): void {
+  console.log(chalk.bold("\nAI Shell — connected"));
+  console.log(chalk.gray(`Root: ${session.root}`));
+  console.log(chalk.gray(`Stacks: ${session.profile.stacks.join(", ")}`));
+  console.log(chalk.gray(`Provider: ${session.config.provider}`));
+  console.log(chalk.gray(`Config: .ai-shell.json in ${session.root}`));
+  if (session.config.provider === "mock") {
+    console.log(
+      chalk.yellow(
+        "Using mock LLM — add keys in .ai-shell.json or use /setkey openai <key>",
+      ),
+    );
+  }
+  console.log(chalk.gray("\nType /help for commands.\n"));
 }

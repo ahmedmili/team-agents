@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Router } from "../src/core/router.js";
 import { AgentRegistry } from "../src/agents/registry.js";
-import { MockLlmProvider } from "../src/llm/mock.js";
+import { LlmRegistry } from "../src/llm/registry.js";
 import type { ProjectProfile } from "../src/schemas/index.js";
 
 const profile: ProjectProfile = {
@@ -14,10 +14,13 @@ const profile: ProjectProfile = {
 };
 
 describe("Router", () => {
-  const registry = new AgentRegistry(new MockLlmProvider(), {
+  const config = {
     agents: { karim: "backend", sara: "architect", flutter: "backend" },
     provider: "mock",
-  });
+    keys: {},
+    models: {},
+  } as const;
+  const registry = new AgentRegistry(new LlmRegistry(config), config);
   const router = new Router(registry);
 
   it("routes natural language to tech lead", () => {

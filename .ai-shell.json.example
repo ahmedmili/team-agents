@@ -1,11 +1,59 @@
 {
   "projectName": "my-project",
   "provider": "openai",
+  "keys": {
+    "openai": "sk-your-openai-key-here",
+    "anthropic": "sk-ant-your-anthropic-key-here",
+    "huggingface": "hf_your_huggingface_token_here",
+    "openrouter": "or-your-openrouter-key-here"
+  },
   "models": {
-    "techLead": "gpt-4o-mini",
-    "backend": "gpt-4o-mini",
-    "qa": "gpt-4o-mini",
-    "architect": "gpt-4o-mini"
+    "openai": {
+      "techLead": "gpt-4o-mini",
+      "backend": "gpt-4o-mini",
+      "qa": "gpt-4o-mini",
+      "architect": "gpt-4o-mini"
+    },
+    "anthropic": {
+      "techLead": "claude-3-5-haiku-20241022",
+      "backend": "claude-3-5-haiku-20241022",
+      "qa": "claude-3-5-haiku-20241022",
+      "architect": "claude-3-5-haiku-20241022"
+    },
+    "huggingface": {
+      "techLead": "Qwen/Qwen2.5-7B-Instruct",
+      "backend": "Qwen/Qwen2.5-7B-Instruct",
+      "qa": "HuggingFaceH4/zephyr-7b-beta",
+      "architect": "Qwen/Qwen2.5-7B-Instruct"
+    },
+    "openrouter": {
+      "techLead": "openai/gpt-4o-mini",
+      "backend": "anthropic/claude-sonnet-4-6",
+      "qa": "google/gemini-2.0-flash-lite",
+      "architect": "anthropic/claude-sonnet-4-6"
+    },
+    "puter": {
+      "techLead": "openai/gpt-5.4-nano",
+      "backend": "anthropic/claude-sonnet-4-6",
+      "qa": "openai/gpt-5.4-nano",
+      "architect": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "adapterConfig": {
+    "openrouter": {
+      "enabled": true,
+      "baseUrl": "https://openrouter.ai/api/v1"
+    },
+    "puter": {
+      "enabled": false,
+      "mode": "disabled",
+      "endpoint": "",
+      "sessionToken": ""
+    }
+  },
+  "agentProviders": {
+    "techLead": "openai",
+    "backend": "anthropic"
   },
   "agents": {
     "karim": "backend",

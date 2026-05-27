@@ -5,6 +5,7 @@ import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import type { PatchRecord, ProjectProfile } from "../schemas/index.js";
 import type { AgentRole } from "../schemas/index.js";
+import type { LlmProviderName } from "../config/types.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -22,6 +23,18 @@ export interface MessageRow {
   role: "user" | "assistant" | "system";
   content: string;
   agent_id: string | null;
+  created_at: string;
+}
+
+export interface ProviderEventRow {
+  id: string;
+  session_id: string;
+  provider: LlmProviderName;
+  role: AgentRole;
+  model: string;
+  status: "ok" | "error";
+  latency_ms: number;
+  error_message: string | null;
   created_at: string;
 }
 
@@ -71,8 +84,21 @@ export class MemoryStore {
         profile_json TEXT NOT NULL,
         FOREIGN KEY (session_id) REFERENCES sessions(id)
       );
+      CREATE TABLE IF NOT EXISTS provider_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        role TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        latency_ms INTEGER NOT NULL,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
       CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
       CREATE INDEX IF NOT EXISTS idx_patches_session ON patches(session_id);
+      CREATE INDEX IF NOT EXISTS idx_provider_events_session ON provider_events(session_id);
     `);
   }
 
@@ -219,6 +245,78 @@ export class MemoryStore {
       .prepare(`SELECT * FROM patches WHERE id = ?`)
       .get(id) as PatchDbRow | undefined;
     return row ? rowToPatch(row) : null;
+  }
+
+  saveProviderEvent(event: Omit<ProviderEventRow, "id" | "created_at">): void {
+    this.db
+      .prepare(
+        `INSERT INTO provider_events (id, session_id, provider, role, model, status, latency_ms, error_message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        uuidv4(),
+        event.session_id,
+        event.provider,
+        event.role,
+        event.model,
+        event.status,
+        event.latency_ms,
+        event.error_message,
+        new Date().toISOString(),
+      );
+  }
+
+  getProviderEvents(sessionId: string, limit = 200): ProviderEventRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM provider_events WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(sessionId, limit) as ProviderEventRow[];
+  }
+
+  getProviderMetrics(sessionId: string): Array<{
+    provider: string;
+    calls: number;
+    errors: number;
+    avg_latency_ms: number;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT provider,
+                COUNT(*) AS calls,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                ROUND(AVG(latency_ms), 2) AS avg_latency_ms
+         FROM provider_events
+         WHERE session_id = ?
+         GROUP BY provider
+         ORDER BY calls DESC`,
+      )
+      .all(sessionId) as Array<{
+      provider: string;
+      calls: number;
+      errors: number;
+      avg_latency_ms: number;
+    }>;
+  }
+
+  getRecentSessions(limit = 20): SessionRow[] {
+    return this.db
+      .prepare(`SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?`)
+      .all(limit) as SessionRow[];
+  }
+
+  getRecentMessages(limit = 100): MessageRow[] {
+    return this.db
+      .prepare(`SELECT * FROM messages ORDER BY created_at DESC LIMIT ?`)
+      .all(limit) as MessageRow[];
+  }
+
+  getRecentPatches(limit = 100): PatchRecord[] {
+    return (
+      this.db
+        .prepare(`SELECT * FROM patches ORDER BY created_at DESC LIMIT ?`)
+        .all(limit) as PatchDbRow[]
+    ).map(rowToPatch);
   }
 
   close(): void {

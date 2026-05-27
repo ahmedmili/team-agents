@@ -41,11 +41,15 @@ export abstract class BaseAgent {
   abstract readonly scope: AgentScope;
 
   constructor(
-    protected llm: LlmProvider,
-    protected getModel: (role: AgentRole) => string,
+    protected getProviderForRole: (role: AgentRole) => LlmProvider,
+    protected getModelForRole: (role: AgentRole) => string,
   ) {}
 
+  protected provider(): LlmProvider {
+    return this.getProviderForRole(this.role);
+  }
+
   protected model(): string {
-    return this.getModel(this.role);
+    return this.getModelForRole(this.role);
   }
 }

@@ -5,17 +5,20 @@ import type { LlmMessage, LlmProvider } from "./types.js";
 import { LlmRateLimitError } from "../utils/errors.js";
 
 const KEY_HELP =
-  'Add "keys": { "openai": "sk-..." } to .ai-shell.json or run: ai config set-key openai <key>';
+  'Add "keys": { "openrouter": "or-..." } to .ai-shell.json or run: ai config set-key openrouter <key>';
 
-export class OpenAiProvider implements LlmProvider {
-  readonly name = "openai";
+export class OpenRouterProvider implements LlmProvider {
+  readonly name = "openrouter";
   private client: OpenAI;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, baseUrl = "https://openrouter.ai/api/v1") {
     if (!apiKey?.trim()) {
-      throw new Error(`OpenAI API key not configured. ${KEY_HELP}`);
+      throw new Error(`OpenRouter API key not configured. ${KEY_HELP}`);
     }
-    this.client = new OpenAI({ apiKey: apiKey.trim() });
+    this.client = new OpenAI({
+      apiKey: apiKey.trim(),
+      baseURL: baseUrl,
+    });
   }
 
   async structured<T>(
@@ -23,9 +26,10 @@ export class OpenAiProvider implements LlmProvider {
     messages: LlmMessage[],
     model: string,
   ): Promise<T> {
+    const normalizedModel = normalizeModel(model);
     try {
       const response = await this.client.beta.chat.completions.parse({
-        model,
+        model: normalizedModel,
         messages: messages.map((m) => ({
           role: m.role,
           content: m.content,
@@ -33,7 +37,7 @@ export class OpenAiProvider implements LlmProvider {
         response_format: zodResponseFormat(schema, "response"),
       });
       const parsed = response.choices[0]?.message?.parsed;
-      if (!parsed) throw new Error("No parsed response from OpenAI");
+      if (!parsed) throw new Error("No parsed response from OpenRouter");
       return parsed;
     } catch (err) {
       if (isRateLimit(err)) throw new LlmRateLimitError(String(err));
@@ -42,9 +46,10 @@ export class OpenAiProvider implements LlmProvider {
   }
 
   async complete(messages: LlmMessage[], model: string): Promise<string> {
+    const normalizedModel = normalizeModel(model);
     try {
       const response = await this.client.chat.completions.create({
-        model,
+        model: normalizedModel,
         messages: messages.map((m) => ({
           role: m.role,
           content: m.content,
@@ -56,6 +61,10 @@ export class OpenAiProvider implements LlmProvider {
       throw err;
     }
   }
+}
+
+function normalizeModel(model: string): string {
+  return model.startsWith("openrouter/") ? model.replace("openrouter/", "") : model;
 }
 
 function isRateLimit(err: unknown): boolean {

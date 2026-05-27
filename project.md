@@ -273,17 +273,23 @@ This system is designed to evolve into a local AI software factory, where develo
 - No local Ollama / offline models
 - No custom user-defined agents (fixed four roles + Tech Lead)
 
-### Environment variables
+### Keys and provider configuration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | One of OpenAI/Anthropic | OpenAI API key |
-| `ANTHROPIC_API_KEY` | One of OpenAI/Anthropic | Anthropic API key |
-| `AI_SHELL_PROVIDER` | No | `openai` or `anthropic` (default: auto-detect) |
-| `AI_SHELL_MODEL` | No | Default model override |
-| `AI_SHELL_MODEL_TECH_LEAD` | No | Per-role model override |
-| `AI_SHELL_MODEL_BACKEND` | No | Per-role model override |
-| `AI_SHELL_MAX_STEPS` | No | Max orchestrator steps per message (default: 5) |
+Keys are stored in `.ai-shell.json` and can be managed through CLI commands.
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `keys.openai` | No | OpenAI API key |
+| `keys.anthropic` | No | Anthropic (Claude) API key |
+| `keys.huggingface` | No | Hugging Face token (`hf_...`) |
+| `keys.openrouter` | No | OpenRouter API key (`or_...`) |
+| `adapterConfig.puter` | No | Experimental Puter proxy adapter settings |
+
+Provider resolution:
+
+1. Use `agentProviders.<role>` when set
+2. Otherwise use global `provider`
+3. Fallback to Hugging Face/OpenRouter/Puter if available, then OpenAI/Anthropic, else `mock`
 
 ### Session lifecycle
 
@@ -298,11 +304,59 @@ This system is designed to evolve into a local AI software factory, where develo
 {
   "projectName": "my-api",
   "provider": "openai",
+  "keys": {
+    "openai": "sk-...",
+    "anthropic": "sk-ant-...",
+    "huggingface": "hf_...",
+    "openrouter": "or-..."
+  },
   "models": {
-    "techLead": "gpt-4o",
-    "backend": "gpt-4o",
-    "qa": "gpt-4o-mini",
-    "architect": "gpt-4o-mini"
+    "openai": {
+      "techLead": "gpt-4o-mini",
+      "backend": "gpt-4o-mini",
+      "qa": "gpt-4o-mini",
+      "architect": "gpt-4o-mini"
+    },
+    "anthropic": {
+      "techLead": "claude-3-5-haiku-20241022",
+      "backend": "claude-3-5-haiku-20241022",
+      "qa": "claude-3-5-haiku-20241022",
+      "architect": "claude-3-5-haiku-20241022"
+    },
+    "huggingface": {
+      "techLead": "Qwen/Qwen2.5-7B-Instruct",
+      "backend": "Qwen/Qwen2.5-7B-Instruct",
+      "qa": "HuggingFaceH4/zephyr-7b-beta",
+      "architect": "Qwen/Qwen2.5-7B-Instruct"
+    },
+    "openrouter": {
+      "techLead": "openai/gpt-4o-mini",
+      "backend": "anthropic/claude-sonnet-4-6",
+      "qa": "google/gemini-2.0-flash-lite",
+      "architect": "anthropic/claude-sonnet-4-6"
+    },
+    "puter": {
+      "techLead": "openai/gpt-5.4-nano",
+      "backend": "anthropic/claude-sonnet-4-6",
+      "qa": "openai/gpt-5.4-nano",
+      "architect": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "adapterConfig": {
+    "openrouter": {
+      "enabled": true,
+      "baseUrl": "https://openrouter.ai/api/v1"
+    },
+    "puter": {
+      "enabled": false,
+      "mode": "disabled",
+      "endpoint": "",
+      "sessionToken": ""
+    }
+  },
+  "agentProviders": {
+    "techLead": "openai",
+    "backend": "anthropic"
   },
   "agents": {
     "karim": "backend",

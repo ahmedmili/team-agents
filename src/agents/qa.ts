@@ -19,7 +19,7 @@ export class QaAgent extends BaseAgent {
       "[OUTPUT_TYPE:review]",
       input,
     );
-    const data = await this.llm.structured(
+    const data = await this.provider().structured(
       ReviewOutputSchema,
       messages,
       this.model(),

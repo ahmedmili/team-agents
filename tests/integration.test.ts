@@ -4,8 +4,8 @@ import fs from "fs-extra";
 import { fileURLToPath } from "node:url";
 import { Session } from "../src/core/session.js";
 import { MemoryStore } from "../src/memory/store.js";
-import { createLlmProvider } from "../src/llm/factory.js";
 import { AgentRegistry } from "../src/agents/registry.js";
+import { LlmRegistry } from "../src/llm/registry.js";
 import { Router } from "../src/core/router.js";
 import { Orchestrator } from "../src/core/orchestrator.js";
 import { parseInput } from "../src/core/parser.js";
@@ -41,9 +41,8 @@ describe("Phase 1 integration (express-sample)", () => {
     const session = await Session.create(sampleRoot, store);
     expect(session.profile.stacks).toContain("express");
 
-    const config = { ...session.config, provider: "mock" as const };
-    const llm = createLlmProvider(config);
-    const registry = new AgentRegistry(llm, config);
+    const config = { ...session.config, provider: "mock" as const, keys: {} };
+    const registry = new AgentRegistry(new LlmRegistry(config), config);
     const router = new Router(registry);
     const orchestrator = new Orchestrator(session, registry, store);
 
@@ -74,9 +73,8 @@ describe("Phase 1 integration (express-sample)", () => {
 
   it("@sara review does not create patches", async () => {
     const session = await Session.create(sampleRoot, store);
-    const config = { ...session.config, provider: "mock" as const };
-    const llm = createLlmProvider(config);
-    const registry = new AgentRegistry(llm, config);
+    const config = { ...session.config, provider: "mock" as const, keys: {} };
+    const registry = new AgentRegistry(new LlmRegistry(config), config);
     const router = new Router(registry);
     const orchestrator = new Orchestrator(session, registry, store);
 

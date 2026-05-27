@@ -4,7 +4,6 @@ import {
   type AgentOutput,
 } from "../schemas/index.js";
 import { BaseAgent, buildMessages, type AgentInput } from "./base.js";
-import type { LlmProvider } from "../llm/types.js";
 import type { AgentRole } from "../schemas/index.js";
 import { formatContextPack } from "../repo/scanner.js";
 
@@ -26,7 +25,7 @@ export class BackendAgent extends BaseAgent {
       "[OUTPUT_TYPE:patch]",
       enriched,
     );
-    const data = await this.llm.structured(
+    const data = await this.provider().structured(
       PatchOutputSchema,
       messages,
       this.model(),

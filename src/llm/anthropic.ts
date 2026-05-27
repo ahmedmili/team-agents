@@ -3,14 +3,18 @@ import type { z } from "zod";
 import type { LlmMessage, LlmProvider } from "./types.js";
 import { LlmRateLimitError } from "../utils/errors.js";
 
+const KEY_HELP =
+  'Add "keys": { "anthropic": "sk-ant-..." } to .ai-shell.json or run: ai config set-key anthropic <key>';
+
 export class AnthropicProvider implements LlmProvider {
   readonly name = "anthropic";
   private client: Anthropic;
 
   constructor(apiKey?: string) {
-    const key = apiKey ?? process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("ANTHROPIC_API_KEY is required");
-    this.client = new Anthropic({ apiKey: key });
+    if (!apiKey?.trim()) {
+      throw new Error(`Anthropic API key not configured. ${KEY_HELP}`);
+    }
+    this.client = new Anthropic({ apiKey: apiKey.trim() });
   }
 
   async structured<T>(

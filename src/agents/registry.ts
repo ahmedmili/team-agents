@@ -4,24 +4,26 @@ import { TechLeadAgent } from "./tech-lead.js";
 import { BackendAgent } from "./backend.js";
 import { QaAgent } from "./qa.js";
 import { ArchitectAgent } from "./architect.js";
-import type { LlmProvider } from "../llm/types.js";
 import type { AiShellConfig } from "../config/types.js";
+import { LlmRegistry } from "../llm/registry.js";
 
 export class AgentRegistry {
   private agents: Map<AgentRole, Agent>;
 
   constructor(
-    llm: LlmProvider,
+    private llmRegistry: LlmRegistry,
     private config: AiShellConfig,
   ) {
-    const getModel = (role: AgentRole) =>
-      config.models?.[role] ?? "gpt-4o-mini";
+    const getProviderForRole = (role: AgentRole) =>
+      llmRegistry.getProviderForRole(role);
+    const getModelForRole = (role: AgentRole) =>
+      llmRegistry.getModelForRole(role);
 
     this.agents = new Map([
-      ["techLead", new TechLeadAgent(llm, getModel)],
-      ["backend", new BackendAgent(llm, getModel)],
-      ["qa", new QaAgent(llm, getModel)],
-      ["architect", new ArchitectAgent(llm, getModel)],
+      ["techLead", new TechLeadAgent(getProviderForRole, getModelForRole)],
+      ["backend", new BackendAgent(getProviderForRole, getModelForRole)],
+      ["qa", new QaAgent(getProviderForRole, getModelForRole)],
+      ["architect", new ArchitectAgent(getProviderForRole, getModelForRole)],
     ]);
   }
 
