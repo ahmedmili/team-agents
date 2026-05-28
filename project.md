@@ -121,12 +121,16 @@ This ensures agents behave project-aware, not generic.
 Inside the shell:
 
 Core commands
-/connect        # start session
+ai connect      # start session (from shell)
+/connect        # refresh repo scan inside REPL
 /diff           # show pending changes
 /apply          # apply approved patches
-/status         # show active tasks
+/reject         # reject pending patches
+/rollback       # revert applied changes
+/status         # session, tasks, patches, memory
+/artifacts      # agent report files (.md)
+/sessions       # recent projects (multi-project)
 /agents         # list agents
-/rollback       # revert changes
 Natural mode
 add login system
 Agent mode
@@ -427,3 +431,58 @@ Provider resolution:
   "backupPath": "string?"
 }
 ```
+
+### Phase 1 completion checklist
+
+| Feature | Status |
+|---------|--------|
+| Persistent REPL (`ai connect`) | Done |
+| Four agents + Tech Lead orchestration | Done |
+| `@agent` routing + stack escalation | Done |
+| Diff-gated edits (`/diff`, `/apply`, `/rollback`, `/reject`) | Done |
+| Repo scanner + project profile | Done |
+| SQLite sessions (7-day resume) | Done |
+| `.ai-shell.json` keys + per-role providers | Done |
+| Providers: OpenAI, Anthropic, HF, OpenRouter, Puter, mock | Done |
+| Structured outputs (Zod) + schema hints in prompts | Done |
+| Default task pipeline when plan is empty | Done |
+| Plan task `done` status + SQLite `session_state` | Done |
+| Session memory summary (Phase 2 starter) | Done |
+| Agent Markdown artifacts | Done |
+| Local dashboard + provider telemetry | Done (beyond original Phase 1 non-goals) |
+| MCP / autonomous PR / custom agents / Ollama | Not started (non-goals) |
+
+### Agent artifacts
+
+Each agent run writes a report under:
+
+`.ai-shell/agents/<session-id>/<timestamp>-<role>.md`
+
+In the REPL:
+
+- `/artifacts` — list files for the current session
+- `/artifacts preview` — show the latest artifact body
+
+### Session memory (Phase 2 starter)
+
+After an orchestrated flow, a short **session memory summary** is stored in SQLite (`session_state.memory_summary`) and injected into later agent prompts. View with `/status`.
+
+### REPL commands (extended)
+
+| Command | Description |
+|---------|-------------|
+| `/connect` | Refresh repo scan (start session with `ai connect`) |
+| `/reject [id\|all]` | Mark pending patches as rejected |
+| `/artifacts [preview]` | List or preview agent `.md` reports |
+| `/sessions` | List recent projects; switch with `ai connect -C <path>` |
+| `/dashboard`, `/metrics`, `/history` | Observability |
+
+### Local dashboard (not cloud SaaS)
+
+Phase 1 non-goals exclude a **hosted** UI. A **local** dashboard is available:
+
+```bash
+ai dashboard
+```
+
+Provider call metrics are stored in `provider_events` and exposed via `/metrics` and the dashboard observability page.

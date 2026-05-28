@@ -22,41 +22,63 @@ export class HuggingFaceProvider implements LlmProvider {
     messages: LlmMessage[],
     model: string,
   ): Promise<T> {
-    const system = messages.find((m) => m.role === "system")?.content ?? "";
-    const chatMessages: LlmMessage[] = [
-      {
-        role: "system",
-        content: [
-          system,
-          "You MUST output a single, valid JSON object.",
-          "Rules: no markdown fences, no extra text, no trailing commas.",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      },
-      ...messages.filter((m) => m.role !== "system"),
-    ];
+    const strictSuffix =
+      "You MUST output a single, valid JSON object. Rules: no markdown fences, no extra text, no trailing commas.";
+
+    let lastJson: unknown = {};
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const system = messages.find((m) => m.role === "system")?.content ?? "";
+      const retryNote =
+        attempt === 1
+          ? "RETRY: Your previous response was invalid. Output ONLY valid JSON matching the schema example."
+          : "";
+      const chatMessages: LlmMessage[] = [
+        {
+          role: "system",
+          content: [system, strictSuffix, retryNote].filter(Boolean).join("\n\n"),
+        },
+        ...messages.filter((m) => m.role !== "system"),
+      ];
+
+      try {
+        const parsed = await this.parseStructuredResponse(
+          schema,
+          chatMessages,
+          model,
+        );
+        return parsed.value;
+      } catch (err) {
+        if (err instanceof StructuredParseError) {
+          lastJson = err.json;
+          if (attempt === 0) continue;
+          return schema.parse(buildFallbackFromSchema(schema, lastJson));
+        }
+        throw err;
+      }
+    }
+
+    return schema.parse(buildFallbackFromSchema(schema, lastJson));
+  }
+
+  private async parseStructuredResponse<T>(
+    schema: z.ZodType<T>,
+    chatMessages: LlmMessage[],
+    model: string,
+  ): Promise<{ value: T; json: unknown }> {
     const text = await this.complete(chatMessages, model);
     let json: unknown;
     try {
       json = extractJson(text);
     } catch {
-      // If the model doesn't return JSON at all, fall back to schema defaults.
-      return schema.parse(buildFallbackFromSchema(schema, { message: text }));
+      const fallback = buildFallbackFromSchema(schema, { message: text });
+      return { value: schema.parse(fallback), json: fallback };
     }
 
     try {
-      return schema.parse(json);
-    } catch (err) {
-      // Some HF models do not follow our JSON instructions and return
-      // error-shaped objects (e.g. { review: false, message: "..." }).
-      // Prefer a deterministic fallback over crashing the whole CLI.
-      const maybeZod = err as { name?: string };
-      if (maybeZod?.name === "ZodError") {
-        const fallback = buildFallbackFromSchema(schema, json);
-        return schema.parse(fallback);
-      }
-      throw err;
+      return { value: schema.parse(json), json };
+    } catch {
+      throw new StructuredParseError(json);
     }
   }
 
@@ -79,6 +101,13 @@ export class HuggingFaceProvider implements LlmProvider {
       if (isRateLimit(err)) throw new LlmRateLimitError(String(err));
       throw formatHfError(err);
     }
+  }
+}
+
+class StructuredParseError extends Error {
+  constructor(readonly json: unknown) {
+    super("Failed to parse structured JSON");
+    this.name = "StructuredParseError";
   }
 }
 

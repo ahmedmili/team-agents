@@ -21,6 +21,9 @@ import {
   resolveProviderForRole,
 } from "../config/loader.js";
 import type { AgentRole } from "../schemas/index.js";
+import { listAgentArtifacts } from "../core/artifacts.js";
+import fs from "fs-extra";
+import path from "node:path";
 
 export interface CommandContext {
   session: Session;
@@ -49,6 +52,12 @@ export async function handleCommand(
       return await applyCommand(ctx, args);
     case "rollback":
       return await rollbackCommand(ctx, args);
+    case "reject":
+      return rejectCommand(ctx, args);
+    case "artifacts":
+      return showArtifacts(ctx, args);
+    case "sessions":
+      return showSessions(ctx);
     case "status":
       return showStatus(ctx);
     case "agents":
@@ -85,6 +94,9 @@ Commands:
   /diff              Show pending patches
   /apply [id|all]    Apply patch(es)
   /rollback [id|all] Revert applied patches
+  /reject [id|all]   Reject pending patches (no file changes)
+  /artifacts [n]     List agent report files (.md); optional preview of latest
+  /sessions          List recent project sessions (multi-project)
   /status            Session and task status
   /agents            List agent aliases
   /keys              Show API keys (masked)
@@ -299,6 +311,74 @@ async function applyCommand(
   return lines;
 }
 
+function rejectCommand(ctx: CommandContext, args: string[]): string[] {
+  let pending = ctx.store.getPatches(ctx.session.id, "pending");
+  const target = args[0];
+
+  if (target && target !== "all") {
+    pending = pending.filter(
+      (p) => p.id === target || p.id.startsWith(target),
+    );
+  }
+  if (!pending.length) return [chalk.gray("No pending patches to reject.")];
+
+  for (const p of pending) {
+    ctx.store.updatePatchStatus(p.id, "rejected");
+  }
+  return [chalk.green(`Rejected ${pending.length} patch(es).`)];
+}
+
+function showArtifacts(ctx: CommandContext, args: string[]): string[] {
+  const artifacts = listAgentArtifacts(ctx.session.root, ctx.session.id);
+  if (!artifacts.length) {
+    return [
+      chalk.gray("No agent artifacts yet."),
+      chalk.gray(`Path: .ai-shell/agents/${ctx.session.id}/`),
+    ];
+  }
+
+  const lines = [
+    `Agent artifacts (${artifacts.length}):`,
+    chalk.gray(`Directory: .ai-shell/agents/${ctx.session.id}/`),
+    "",
+  ];
+
+  const previewArg = args[0];
+  const limit = previewArg && previewArg !== "preview" ? 20 : 10;
+
+  for (const a of artifacts.slice(0, limit)) {
+    const when = new Date(a.mtimeMs).toISOString();
+    lines.push(`  ${a.relativePath}  (${a.role}, ${when})`);
+  }
+
+  if (args[0] === "preview" || args.includes("preview")) {
+    const latest = artifacts[0]!;
+    const fullPath = path.join(ctx.session.root, latest.relativePath);
+    const body = fs.readFileSync(fullPath, "utf-8");
+    lines.push("", chalk.bold("--- Latest artifact preview ---"), body.slice(0, 2000));
+    if (body.length > 2000) lines.push(chalk.gray("... (truncated)"));
+  }
+
+  return lines;
+}
+
+function showSessions(ctx: CommandContext): string[] {
+  const sessions = ctx.store.getRecentSessions(15);
+  if (!sessions.length) return [chalk.gray("No sessions yet.")];
+
+  const lines = [
+    "Recent sessions (run ai connect -C <path> to switch project):",
+    "",
+  ];
+  for (const s of sessions) {
+    const current = s.cwd === ctx.session.root ? chalk.green(" (current)") : "";
+    lines.push(`  [${s.updated_at}] ${s.project_name}${current}`);
+    lines.push(chalk.gray(`    ${s.cwd}`));
+    lines.push(chalk.gray(`    id: ${s.id}`));
+  }
+  return lines;
+}
+
 async function rollbackCommand(
   ctx: CommandContext,
   args: string[],
@@ -322,14 +402,20 @@ async function rollbackCommand(
 function showStatus(ctx: CommandContext): string[] {
   const pending = ctx.store.getPatches(ctx.session.id, "pending");
   const applied = ctx.store.getPatches(ctx.session.id, "applied");
+  const rejected = ctx.store.getPatches(ctx.session.id, "rejected");
   const msgs = ctx.store.getMessages(ctx.session.id, 5);
+  const plan = ctx.store.getSessionPlan(ctx.session.id);
+  const memorySummary = ctx.store.getSessionSummary(ctx.session.id);
+  const artifacts = listAgentArtifacts(ctx.session.root, ctx.session.id);
   const openai = ctx.session.config.keys?.openai;
   const anthropic = ctx.session.config.keys?.anthropic;
   const huggingface = ctx.session.config.keys?.huggingface;
   const openrouter = ctx.session.config.keys?.openrouter;
-  return [
+
+  const lines = [
     `Project: ${ctx.session.projectName}`,
     `Root: ${ctx.session.root}`,
+    `Session: ${ctx.session.id}`,
     `Stacks: ${ctx.session.profile.stacks.join(", ")}`,
     `Provider: ${ctx.session.config.provider}`,
     `OpenAI key: ${openai ? "set" : "not set"}`,
@@ -338,8 +424,22 @@ function showStatus(ctx: CommandContext): string[] {
     `OpenRouter key: ${openrouter ? "set" : "not set"}`,
     `Pending patches: ${pending.length}`,
     `Applied patches: ${applied.length}`,
+    `Rejected patches: ${rejected.length}`,
+    `Agent artifacts: ${artifacts.length}`,
     `Recent messages: ${msgs.length}`,
   ];
+
+  if (plan) {
+    lines.push("", "Plan tasks:");
+    for (const t of plan.tasks) {
+      lines.push(`  [${t.status}] ${t.agent}: ${t.description.slice(0, 80)}`);
+    }
+  }
+  if (memorySummary) {
+    lines.push("", "Session memory:", chalk.gray(memorySummary.slice(0, 300)));
+  }
+
+  return lines;
 }
 
 function listAgents(ctx: CommandContext): string[] {

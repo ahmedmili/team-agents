@@ -2,6 +2,7 @@ import type { AiShellConfig } from "../config/types.js";
 import type { AgentScope } from "../config/types.js";
 import type { AgentRole, AgentOutput, ProjectProfile } from "../schemas/index.js";
 import type { LlmProvider, LlmMessage } from "../llm/types.js";
+import { schemaHintForOutputTag } from "../llm/schema-prompts.js";
 
 export interface AgentInput {
   message: string;
@@ -27,10 +28,18 @@ export function buildMessages(
     input.conversationSummary ?? "",
   ].join("\n");
 
+  const schemaHint = schemaHintForOutputTag(outputTag);
+
   return [
     {
       role: "system",
-      content: `${systemPrompt}\n\n${outputTag}\n\nProject context:\n${context}`,
+      content: [
+        systemPrompt,
+        outputTag,
+        schemaHint,
+        "Project context:",
+        context,
+      ].join("\n\n"),
     },
     { role: "user", content: input.message },
   ];

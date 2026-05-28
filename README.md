@@ -32,8 +32,11 @@ add JWT authentication
 @sara review architecture
 /diff
 /apply all
+/reject all
 /rollback all
 /status
+/artifacts preview
+/sessions
 /agents
 /exit
 ```
@@ -203,7 +206,13 @@ See [project.md](project.md) for vision, agent schemas, and Phase 1 scope.
 - Persistent REPL (`ai connect`)
 - Multi-agent orchestration (Tech Lead hub-and-spoke)
 - `@agent` routing with stack scope checks
-- Diff-gated file writes (`/diff`, `/apply`, `/rollback`)
+- Diff-gated file writes (`/diff`, `/apply`, `/reject`, `/rollback`)
+- Per-agent Markdown reports (`.ai-shell/agents/<session-id>/`) — `/artifacts`
+- Default backend → qa → architect pipeline when Tech Lead returns no tasks
+- Plan task lifecycle (`pending` / `done`) persisted in SQLite
+- Session memory summary injected into later prompts (Phase 2 starter)
+- `/sessions` for multi-project session list (`ai connect -C <path>` to switch)
 - Repo scanner and stack detection
 - SQLite session memory (7-day resume)
 - OpenAI, Anthropic, Hugging Face, OpenRouter, experimental Puter proxy, and mock providers
+- Local dashboard (`ai dashboard`) and provider telemetry (`/metrics`)

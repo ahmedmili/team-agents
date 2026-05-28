@@ -9,7 +9,8 @@ import { formatContextPack } from "../repo/scanner.js";
 
 const SYSTEM = `You are the Backend developer agent. Propose code changes as unified diffs only.
 Each patch must use valid unified diff format for the target file path relative to project root.
-Never modify files outside backend scope.`;
+Only patch source files: **/*.ts, **/*.js, **/*.json (not README.md or other docs).
+For analysis or documentation requests, return an empty patches array and explain in summary.`;
 
 export class BackendAgent extends BaseAgent {
   readonly role: AgentRole = "backend";

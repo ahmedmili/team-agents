@@ -3,7 +3,7 @@ import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
-import type { PatchRecord, ProjectProfile } from "../schemas/index.js";
+import type { PatchRecord, PlanOutput, ProjectProfile } from "../schemas/index.js";
 import type { AgentRole } from "../schemas/index.js";
 import type { LlmProviderName } from "../config/types.js";
 
@@ -99,6 +99,13 @@ export class MemoryStore {
       CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
       CREATE INDEX IF NOT EXISTS idx_patches_session ON patches(session_id);
       CREATE INDEX IF NOT EXISTS idx_provider_events_session ON provider_events(session_id);
+      CREATE TABLE IF NOT EXISTS session_state (
+        session_id TEXT PRIMARY KEY,
+        plan_json TEXT,
+        memory_summary TEXT,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
     `);
   }
 
@@ -179,6 +186,69 @@ export class MemoryStore {
       .prepare(`SELECT profile_json FROM project_profiles WHERE session_id = ?`)
       .get(sessionId) as { profile_json: string } | undefined;
     return row ? (JSON.parse(row.profile_json) as ProjectProfile) : null;
+  }
+
+  saveSessionPlan(sessionId: string, plan: PlanOutput): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           plan_json = excluded.plan_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        JSON.stringify(plan),
+        existing?.memory_summary ?? null,
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionPlan(sessionId: string): PlanOutput | null {
+    const row = this.getSessionStateRow(sessionId);
+    if (!row?.plan_json) return null;
+    return JSON.parse(row.plan_json) as PlanOutput;
+  }
+
+  updateSessionSummary(sessionId: string, summary: string): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           memory_summary = excluded.memory_summary,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        existing?.plan_json ?? null,
+        summary.slice(0, 4000),
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionSummary(sessionId: string): string | null {
+    const row = this.getSessionStateRow(sessionId);
+    return row?.memory_summary ?? null;
+  }
+
+  private getSessionStateRow(sessionId: string): {
+    plan_json: string | null;
+    memory_summary: string | null;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT plan_json, memory_summary FROM session_state WHERE session_id = ?`,
+      )
+      .get(sessionId) as
+      | { plan_json: string | null; memory_summary: string | null }
+      | undefined;
+    return row ?? null;
   }
 
   savePatch(record: PatchRecord): void {
