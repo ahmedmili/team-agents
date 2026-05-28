@@ -137,6 +137,16 @@ export class MemoryStore {
     } catch {
       // column already exists
     }
+    try {
+      this.db.exec(`ALTER TABLE session_state ADD COLUMN workflow_json TEXT`);
+    } catch {
+      // column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE session_state ADD COLUMN loop_trace_json TEXT`);
+    } catch {
+      // column already exists
+    }
   }
 
   private normalizeCwd(cwd: string): string {
@@ -226,8 +236,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            plan_json = excluded.plan_json,
            updated_at = excluded.updated_at`,
@@ -238,6 +248,8 @@ export class MemoryStore {
         existing?.memory_summary ?? null,
         existing?.handoff_json ?? null,
         existing?.pr_url ?? null,
+        existing?.workflow_json ?? null,
+        existing?.loop_trace_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -247,8 +259,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            handoff_json = excluded.handoff_json,
            updated_at = excluded.updated_at`,
@@ -259,6 +271,8 @@ export class MemoryStore {
         existing?.memory_summary ?? null,
         JSON.stringify(handoffs),
         existing?.pr_url ?? null,
+        existing?.workflow_json ?? null,
+        existing?.loop_trace_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -268,8 +282,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            pr_url = excluded.pr_url,
            updated_at = excluded.updated_at`,
@@ -280,6 +294,8 @@ export class MemoryStore {
         existing?.memory_summary ?? null,
         existing?.handoff_json ?? null,
         prUrl,
+        existing?.workflow_json ?? null,
+        existing?.loop_trace_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -288,6 +304,62 @@ export class MemoryStore {
   getSessionPrUrl(sessionId: string): string | null {
     const row = this.getSessionStateRow(sessionId);
     return row?.pr_url ?? null;
+  }
+
+  saveSessionWorkflow(sessionId: string, workflowJson: string): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           workflow_json = excluded.workflow_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        existing?.plan_json ?? null,
+        existing?.memory_summary ?? null,
+        existing?.handoff_json ?? null,
+        existing?.pr_url ?? null,
+        workflowJson,
+        existing?.loop_trace_json ?? null,
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionWorkflow(sessionId: string): string | null {
+    const row = this.getSessionStateRow(sessionId);
+    return row?.workflow_json ?? null;
+  }
+
+  saveSessionLoopTrace(sessionId: string, loopTraceJson: string): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           loop_trace_json = excluded.loop_trace_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        existing?.plan_json ?? null,
+        existing?.memory_summary ?? null,
+        existing?.handoff_json ?? null,
+        existing?.pr_url ?? null,
+        existing?.workflow_json ?? null,
+        loopTraceJson,
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionLoopTrace(sessionId: string): string | null {
+    const row = this.getSessionStateRow(sessionId);
+    return row?.loop_trace_json ?? null;
   }
 
   getSessionHandoffs(sessionId: string): HandoffEntry[] {
@@ -310,8 +382,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            memory_summary = excluded.memory_summary,
            updated_at = excluded.updated_at`,
@@ -322,6 +394,8 @@ export class MemoryStore {
         summary.slice(0, 4000),
         existing?.handoff_json ?? null,
         existing?.pr_url ?? null,
+        existing?.workflow_json ?? null,
+        existing?.loop_trace_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -448,10 +522,12 @@ export class MemoryStore {
     memory_summary: string | null;
     handoff_json: string | null;
     pr_url: string | null;
+    workflow_json: string | null;
+    loop_trace_json: string | null;
   } | null {
     const row = this.db
       .prepare(
-        `SELECT plan_json, memory_summary, handoff_json, pr_url FROM session_state WHERE session_id = ?`,
+        `SELECT plan_json, memory_summary, handoff_json, pr_url, workflow_json, loop_trace_json FROM session_state WHERE session_id = ?`,
       )
       .get(sessionId) as
       | {
@@ -459,6 +535,8 @@ export class MemoryStore {
           memory_summary: string | null;
           handoff_json: string | null;
           pr_url: string | null;
+          workflow_json: string | null;
+          loop_trace_json: string | null;
         }
       | undefined;
     return row ?? null;

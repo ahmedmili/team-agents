@@ -31,6 +31,7 @@ import {
   getFailedRunLogs,
   listWorkflowRuns,
 } from "../git/ci.js";
+import { nextWorkflowTask, workflowSummaryLines, type WorkflowState } from "../core/workflow.js";
 import fs from "fs-extra";
 import path from "node:path";
 
@@ -81,12 +82,14 @@ export async function handleCommand(
       return await handlePr(ctx, args);
     case "ci":
       return await handleCi(ctx, args);
+    case "workflow":
+      return handleWorkflow(ctx, args);
     case "memory":
       return handleMemory(ctx, args);
     case "status":
       return showStatus(ctx);
     case "agents":
-      return listAgents(ctx);
+      return listAgents(ctx, args);
     case "keys":
       return showKeys(ctx);
     case "setkey":
@@ -128,10 +131,11 @@ Commands:
   /mcp               MCP server status and tools
   /pr [--yes]        Create GitHub PR from applied patches (use --dry-run first)
   /ci [run-id]       GitHub Actions runs for current branch
+  /workflow [sub]    Org workflow status/tasks/checkpoint/next
   /memory            List project memory (persists across sessions)
   /memory clear      Clear project memory for this repo
   /status            Session and task status
-  /agents            List agent aliases
+  /agents [@alias]   List agents or inspect one
   /keys              Show API keys (masked)
   /providers         Show active and configured providers
   /setkey <p> <key>  Save key to .ai-shell.json (openai|anthropic|huggingface)
@@ -155,6 +159,8 @@ Outside shell:
   ai mcp status      MCP servers (outside REPL)
   ai pr create       Open PR from applied patches
   ai ci              List workflow runs
+  ai workflow        Show workflow state
+  ai agents          List/inspect configured agents
 `.trim();
 }
 
@@ -276,8 +282,54 @@ function showBoard(ctx: CommandContext): string[] {
     lines.push(chalk.gray("No handoff log yet."));
   }
 
+  const workflowRaw = ctx.store.getSessionWorkflow(ctx.session.id);
+  if (workflowRaw) {
+    try {
+      const workflow = JSON.parse(workflowRaw) as WorkflowState;
+      lines.push("", "Workflow:");
+      lines.push(...workflowSummaryLines(workflow).map((l) => `  ${l}`));
+    } catch {
+      // ignore malformed workflow
+    }
+  }
+
   lines.push("", chalk.gray("Full reports: /artifacts"));
   return lines;
+}
+
+function handleWorkflow(ctx: CommandContext, args: string[]): string[] {
+  const raw = ctx.store.getSessionWorkflow(ctx.session.id);
+  if (!raw) {
+    return [chalk.gray("No active workflow. Trigger a tech-lead orchestration first.")];
+  }
+  let state: WorkflowState;
+  try {
+    state = JSON.parse(raw) as WorkflowState;
+  } catch {
+    return [chalk.red("Workflow data is invalid.")];
+  }
+
+  const sub = (args[0] ?? "status").toLowerCase();
+  if (sub === "tasks") {
+    const lines = ["Workflow tasks:"];
+    for (const t of state.tasks) {
+      lines.push(`  [${t.status}] [${t.agent}] ${t.description}`);
+    }
+    return lines;
+  }
+  if (sub === "checkpoint") {
+    return [
+      `Checkpoint: ${state.checkpoint}`,
+      chalk.gray(`Workflow: ${state.id}`),
+    ];
+  }
+  if (sub === "next") {
+    const nxt = nextWorkflowTask(state);
+    if (!nxt) return [chalk.green("No pending workflow tasks.")];
+    return [`Next: [${nxt.agent}] ${nxt.description}`];
+  }
+
+  return workflowSummaryLines(state);
 }
 
 /** Shared formatter for REPL / CLI project memory listing. */
@@ -502,6 +554,27 @@ async function applyCommand(
   }
   if (!pending.length) return [...lines, chalk.gray("No pending patches to apply.")];
 
+  const allowed: typeof pending = [];
+  for (const patch of pending) {
+    const policy = Object.values(ctx.session.config.customAgents ?? {}).find(
+      (a) => a.role === patch.agentId,
+    )?.policy;
+    if (policy && policy.allowWrite === false) {
+      ctx.store.updatePatchStatus(patch.id, "rejected");
+      lines.push(
+        chalk.yellow(
+          `Policy denied patch ${patch.id.slice(0, 8)} from [${patch.agentId}] (allowWrite=false).`,
+        ),
+      );
+      continue;
+    }
+    allowed.push(patch);
+  }
+  pending = allowed;
+  if (!pending.length) {
+    return [...lines, chalk.gray("No policy-allowed patches to apply.")];
+  }
+
   const backupDir = getBackupDir(ctx.session.id);
   try {
     const result = await applyPatches(ctx.session.root, pending, backupDir);
@@ -623,6 +696,10 @@ function showStatus(ctx: CommandContext): string[] {
   const huggingface = ctx.session.config.keys?.huggingface;
   const openrouter = ctx.session.config.keys?.openrouter;
 
+  const workflow = parseWorkflowState(ctx.store.getSessionWorkflow(ctx.session.id));
+  const loopTraceRaw = ctx.store.getSessionLoopTrace(ctx.session.id);
+  const loopTrace = parseJsonObject(loopTraceRaw);
+
   const lines = [
     `Project: ${ctx.session.projectName}`,
     `Root: ${ctx.session.root}`,
@@ -640,6 +717,8 @@ function showStatus(ctx: CommandContext): string[] {
     `Project memory entries: ${projectMemoryCount}`,
     `Memory capture: ${ctx.session.config.memory?.enabled !== false ? "on" : "off"}`,
     `MCP: ${ctx.session.config.mcp?.enabled ? "on" : "off"}`,
+    `Loop maxTurns: ${ctx.session.config.loop?.maxTurns ?? 1}`,
+    `Workflow: ${workflow ? `${workflow.checkpoint} (${workflow.tasks.filter((t) => t.status === "done").length}/${workflow.tasks.length})` : "off/none"}`,
     `Recent messages: ${msgs.length}`,
   ];
 
@@ -651,6 +730,17 @@ function showStatus(ctx: CommandContext): string[] {
   const mcp = ctx.getMcpManager?.();
   if (mcp?.lastPrefetchError) {
     lines.push(chalk.yellow(`MCP prefetch error: ${mcp.lastPrefetchError}`));
+    lines.push(chalk.gray(`Hint: ${mcpErrorHint(mcp.lastPrefetchError)}`));
+  }
+  if (loopTraceRaw) {
+    lines.push(
+      "Loop trace:",
+      chalk.gray(
+        loopTrace
+          ? JSON.stringify(loopTrace).slice(0, 250)
+          : loopTraceRaw.slice(0, 250),
+      ),
+    );
   }
 
   if (plan) {
@@ -671,17 +761,44 @@ function showStatus(ctx: CommandContext): string[] {
       ),
     );
   }
+  if (loopTrace?.policyDenials) {
+    lines.push(chalk.yellow(`Policy denials: ${String(loopTrace.policyDenials)}`));
+  }
 
   return lines;
 }
 
-function listAgents(ctx: CommandContext): string[] {
+function listAgents(ctx: CommandContext, args: string[]): string[] {
   const aliases = ctx.registry.listAliases();
-  const lines = ["Agents:"];
-  for (const { alias, role } of aliases) {
-    lines.push(`  @${alias} → ${role}`);
+  const requested = args[0]?.replace(/^@/, "").toLowerCase();
+  if (requested) {
+    const item = aliases.find((a) => a.alias.toLowerCase() === requested);
+    if (!item) return [chalk.red(`Unknown agent alias: @${requested}`)];
+    const custom = ctx.session.config.customAgents?.[item.alias.toLowerCase()];
+    const lines = [
+      `Agent @${item.alias}`,
+      `  role: ${item.role}`,
+      `  kind: ${item.kind}`,
+    ];
+    if (custom) {
+      lines.push(
+        `  outputType: ${custom.outputType ?? "message"}`,
+        `  write: ${custom.write ? "true" : "false"}`,
+        `  stacks: ${(custom.stacks ?? ["*"]).join(", ")}`,
+        `  globs: ${(custom.globs ?? ["**/*"]).join(", ")}`,
+        `  policy.allowWrite: ${custom.policy?.allowWrite === false ? "false" : "true"}`,
+        `  policy.allowedToolGroups: ${(custom.policy?.allowedToolGroups ?? []).join(", ") || "(none)"}`,
+      );
+    }
+    return lines;
   }
-  lines.push("", "Roles: techLead, backend, qa, architect");
+
+  const lines = ["Agents:"];
+  for (const { alias, role, kind } of aliases) {
+    lines.push(`  @${alias} → ${role} ${chalk.gray(`(${kind})`)}`);
+  }
+  const customRoles = Object.values(ctx.session.config.customAgents ?? {}).map((a) => a.role);
+  lines.push("", `Roles: techLead, backend, qa, architect${customRoles.length ? `, ${customRoles.join(", ")}` : ""}`);
   return lines;
 }
 
@@ -695,4 +812,40 @@ function parseRoleArg(arg: string): AgentRole | null {
     default:
       return null;
   }
+}
+
+function parseWorkflowState(raw: string | null): WorkflowState | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as WorkflowState;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonObject(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function mcpErrorHint(error: string): string {
+  const text = error.toLowerCase();
+  if (text.includes("auth") || text.includes("401") || text.includes("403")) {
+    return "Check keys.github and run gh auth login.";
+  }
+  if (text.includes("tool") && text.includes("not available")) {
+    return "Server started, but expected tool name differs. Check /mcp output.";
+  }
+  if (text.includes("not found") || text.includes("enoent")) {
+    return "Install required MCP server package and verify command path.";
+  }
+  return "Check /mcp status and provider credentials.";
 }

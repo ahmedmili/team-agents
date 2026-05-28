@@ -11,7 +11,7 @@ import type {
 import type { AgentRole } from "../schemas/index.js";
 import { validatePatchPath, validateStacks } from "../diff/validate.js";
 import { ScopeViolationError } from "../utils/errors.js";
-import { getAgentScopes } from "../config/loader.js";
+import { getScopeForRole } from "../config/loader.js";
 import type { Session } from "./session.js";
 import type { RouteResult } from "./router.js";
 import type { AgentInput } from "../agents/base.js";
@@ -25,6 +25,12 @@ import {
 } from "./handoff.js";
 import type { McpManager } from "../mcp/client.js";
 import { prefetchExternalContext } from "../mcp/prefetch.js";
+import { runAgentLoop, type LoopTrace } from "./agent-loop.js";
+import {
+  createWorkflowFromPlan,
+  markWorkflowTaskDone,
+  type WorkflowState,
+} from "./workflow.js";
 import chalk from "chalk";
 import fs from "fs-extra";
 import path from "node:path";
@@ -37,6 +43,7 @@ interface AgentExecution {
 export class Orchestrator {
   private steps = 0;
   private handoffLog: HandoffEntry[] = [];
+  private policyDenials = 0;
 
   constructor(
     private session: Session,
@@ -48,6 +55,7 @@ export class Orchestrator {
   async handleRoute(route: RouteResult): Promise<string[]> {
     this.steps = 0;
     this.handoffLog = [];
+    this.policyDenials = 0;
     const lines: string[] = [];
 
     if (route.escalated && route.escalationReason) {
@@ -71,7 +79,10 @@ export class Orchestrator {
     lines.push(...this.formatOutput(execution));
 
     if (execution.output.type === "patch") {
-      const { saved, warnings } = await this.persistPatches(execution.output);
+      const { saved, warnings } = await this.persistPatches(
+        execution.output,
+        execution.output.agentId,
+      );
       if (saved.length) {
         lines.push(
           chalk.green(`\n${saved.length} patch(es) queued. Use /diff and /apply.`),
@@ -107,6 +118,11 @@ export class Orchestrator {
       planOut.output.data = plan;
     }
     this.store.saveSessionPlan(this.session.id, plan);
+    let workflow: WorkflowState | null = null;
+    if (this.session.config.workflow?.enabled !== false) {
+      workflow = createWorkflowFromPlan(message, plan);
+      this.store.saveSessionWorkflow(this.session.id, JSON.stringify(workflow));
+    }
 
     for (const task of plan.tasks) {
       if (task.status === "done") continue;
@@ -123,9 +139,16 @@ export class Orchestrator {
 
       task.status = "done";
       this.store.saveSessionPlan(this.session.id, plan);
+      if (workflow) {
+        workflow = markWorkflowTaskDone(workflow, task.id);
+        this.store.saveSessionWorkflow(this.session.id, JSON.stringify(workflow));
+      }
 
       if (out.output.type === "patch") {
-        const { saved, warnings } = await this.persistPatches(out.output);
+        const { saved, warnings } = await this.persistPatches(
+          out.output,
+          out.output.agentId,
+        );
         if (saved.length) {
           lines.push(chalk.green(`  ${saved.length} patch(es) queued.`));
         }
@@ -153,6 +176,20 @@ export class Orchestrator {
     if (this.handoffLog.length) {
       this.store.saveSessionHandoffs(this.session.id, this.handoffLog);
     }
+    if (this.policyDenials > 0) {
+      const prior = this.store.getSessionLoopTrace(this.session.id);
+      const parsed =
+        prior && prior.trim().startsWith("{")
+          ? (JSON.parse(prior) as Record<string, unknown>)
+          : {};
+      this.store.saveSessionLoopTrace(
+        this.session.id,
+        JSON.stringify({
+          ...parsed,
+          policyDenials: this.policyDenials,
+        }),
+      );
+    }
 
     return lines;
   }
@@ -163,13 +200,15 @@ export class Orchestrator {
     handoffOverride?: string,
   ): Promise<AgentExecution> {
     const agent = this.registry.get(role);
-    const scope = getAgentScopes()[role];
+    const scope = getScopeForRole(this.session.config, role);
     validateStacks(scope, this.session.profile.stacks);
 
     const handoffBlock =
       handoffOverride ?? formatHandoffBlock(this.handoffLog);
     const input = await this.buildInput(message, handoffBlock || undefined);
-    const output = await agent.run(input);
+    const loopResult = await runAgentLoop(agent, input, this.session.config.loop);
+    const output = loopResult.output;
+    this.persistLoopTrace(role, loopResult.trace);
 
     this.store.saveMessage(this.session.id, "user", message, role);
     this.store.saveMessage(
@@ -184,6 +223,20 @@ export class Orchestrator {
 
     const artifactPath = this.writeAgentArtifact(role, message, output);
     return { output, artifactPath };
+  }
+
+  private persistLoopTrace(role: AgentRole, trace: LoopTrace): void {
+    const priorRaw = this.store.getSessionLoopTrace(this.session.id);
+    const prior = priorRaw && priorRaw.trim().startsWith("{")
+      ? (JSON.parse(priorRaw) as Record<string, unknown>)
+      : {};
+    this.store.saveSessionLoopTrace(
+      this.session.id,
+      JSON.stringify({
+        ...prior,
+        [role]: trace,
+      }),
+    );
   }
 
   private loadPeerHandoffsFromSession(excludeRole?: AgentRole): string {
@@ -270,12 +323,26 @@ export class Orchestrator {
       .join("\n");
   }
 
-  private async persistPatches(output: AgentOutput): Promise<{
+  private async persistPatches(output: AgentOutput, role: AgentRole): Promise<{
     saved: PatchRecord[];
     warnings: string[];
   }> {
     const data = output.data as PatchOutput;
-    const scope = getAgentScopes().backend;
+    const scope = getScopeForRole(this.session.config, role);
+    const customPolicy = Object.values(this.session.config.customAgents ?? {}).find(
+      (a) => a.role === role,
+    )?.policy;
+    if (customPolicy && customPolicy.allowWrite === false && data.patches.length) {
+      this.policyDenials += data.patches.length;
+      return {
+        saved: [],
+        warnings: [
+          chalk.yellow(
+            `  ⚠ Policy denied ${data.patches.length} patch(es) from [${role}] (allowWrite=false).`,
+          ),
+        ],
+      };
+    }
     const saved: PatchRecord[] = [];
     const warnings: string[] = [];
 
@@ -375,12 +442,16 @@ export class Orchestrator {
       const fileName = `${stamp}-${role}.md`;
       const fullPath = path.join(dir, fileName);
       const relPath = path.relative(this.session.root, fullPath).replace(/\\/g, "/");
+      const workflowJson = this.store.getSessionWorkflow(this.session.id);
+      const loopTraceJson = this.store.getSessionLoopTrace(this.session.id);
       const markdown = [
         `# Agent ${role}`,
         "",
         `- Session: \`${this.session.id}\``,
         `- Time: ${new Date().toISOString()}`,
         `- Output type: \`${output.type}\``,
+        workflowJson ? `- Workflow: \`${workflowJson.slice(0, 160)}\`` : "",
+        loopTraceJson ? `- Loop trace: \`${loopTraceJson.slice(0, 160)}\`` : "",
         "",
         "## Prompt",
         "",

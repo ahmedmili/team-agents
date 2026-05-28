@@ -99,6 +99,23 @@ export async function startDashboardServer(projectRoot: string): Promise<Dashboa
           });
         }
       }
+      if (req.method === "GET" && url.pathname === "/api/workflow") {
+        const latest = store.getRecentSessions(1)[0];
+        if (!latest) return sendJson(res, 200, { workflow: null });
+        const workflow = store.getSessionWorkflow(latest.id);
+        let parsed: unknown = null;
+        if (workflow) {
+          try {
+            parsed = JSON.parse(workflow);
+          } catch {
+            parsed = { malformed: true, raw: workflow.slice(0, 400) };
+          }
+        }
+        return sendJson(res, 200, {
+          sessionId: latest.id,
+          workflow: parsed,
+        });
+      }
       if (req.method === "GET" && url.pathname === "/api/memory") {
         const limit = Number(url.searchParams.get("limit") ?? "50");
         const memories = store.getProjectMemories(projectRoot, limit);

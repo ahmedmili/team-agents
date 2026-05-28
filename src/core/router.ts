@@ -1,6 +1,5 @@
 import type { AgentRegistry } from "../agents/registry.js";
 import type { AgentRole } from "../schemas/index.js";
-import { getAgentScopes } from "../config/loader.js";
 import { stackAllowedForAgent } from "../repo/stack.js";
 import type { ProjectProfile } from "../schemas/index.js";
 import { RoutingError } from "../utils/errors.js";
@@ -27,7 +26,7 @@ export class Router {
           escalationReason: `Unknown agent alias "@${input.alias}". Escalating to Tech Lead.`,
         };
       }
-      const scope = getAgentScopes()[role];
+      const scope = this.registry.get(role).scope;
       if (!stackAllowedForAgent(scope.stacks, profile.stacks)) {
         return {
           targetRole: "techLead",

@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import path from "node:path";
 import type {
   AiShellConfig,
+  CustomAgentConfig,
   FlatModelsConfig,
   LlmProviderName,
   ProviderModelsConfig,
@@ -69,7 +70,55 @@ export function loadConfig(projectRoot: string): AiShellConfig {
           servers: resolveMcpServers(fileConfig.mcp.servers, fileConfig.keys),
         }
       : undefined,
+    customAgents: normalizeCustomAgents(fileConfig.customAgents),
+    loop: {
+      enabled: fileConfig.loop?.enabled ?? true,
+      maxTurns: Math.max(1, fileConfig.loop?.maxTurns ?? 1),
+      maxToolCalls: Math.max(0, fileConfig.loop?.maxToolCalls ?? 0),
+      timeoutMs: Math.max(1000, fileConfig.loop?.timeoutMs ?? 30000),
+    },
+    workflow: {
+      enabled: fileConfig.workflow?.enabled ?? true,
+      autoFromTechLeadPlan: fileConfig.workflow?.autoFromTechLeadPlan ?? true,
+    },
   };
+}
+
+function normalizeCustomAgents(
+  customAgents: AiShellConfig["customAgents"],
+): Record<string, CustomAgentConfig> {
+  if (!customAgents) return {};
+  const out: Record<string, CustomAgentConfig> = {};
+  const RESERVED = new Set(["techlead", "backend", "qa", "architect"]);
+  const usedRoles = new Set<string>();
+  for (const [alias, cfg] of Object.entries(customAgents)) {
+    const key = alias.toLowerCase();
+    if (!key.trim() || RESERVED.has(key)) continue;
+    const role = (cfg.role ?? "").trim();
+    if (!role || RESERVED.has(role.toLowerCase())) continue;
+    if (usedRoles.has(role)) continue;
+    usedRoles.add(role);
+    const outputType =
+      cfg.outputType && ["plan", "patch", "review", "message"].includes(cfg.outputType)
+        ? cfg.outputType
+        : "message";
+    out[key] = {
+      role,
+      outputType,
+      systemPrompt: cfg.systemPrompt?.trim() || "You are a custom AI agent.",
+      provider: cfg.provider,
+      model: cfg.model,
+      stacks: cfg.stacks?.length ? cfg.stacks : ["*"],
+      globs: cfg.globs?.length ? cfg.globs : ["**/*"],
+      write: cfg.write ?? false,
+      policy: {
+        allowWrite: cfg.policy?.allowWrite ?? cfg.write ?? false,
+        allowedToolGroups: cfg.policy?.allowedToolGroups ?? [],
+        escalationRole: cfg.policy?.escalationRole ?? "techLead",
+      },
+    };
+  }
+  return out;
 }
 
 function resolveProvider(fileConfig: AiShellConfig): LlmProviderName {
@@ -241,6 +290,23 @@ function normalizeRole(role: string): AgentRole {
 
 export function getAgentScopes() {
   return DEFAULT_AGENT_SCOPES;
+}
+
+export function getScopeForRole(config: AiShellConfig, role: string) {
+  const builtin = DEFAULT_AGENT_SCOPES[role as AgentRole];
+  if (builtin) return builtin;
+
+  const custom = Object.values(config.customAgents ?? {}).find(
+    (a) => a.role === role,
+  );
+  if (!custom) return DEFAULT_AGENT_SCOPES.techLead;
+
+  return {
+    role,
+    stacks: custom.stacks ?? ["*"],
+    globs: custom.globs ?? ["**/*"],
+    write: custom.write ?? false,
+  };
 }
 
 export { ensureConfigFile };

@@ -42,6 +42,36 @@ export interface MemoryConfig {
   maxEntriesPerProject?: number;
 }
 
+export interface AgentPolicyConfig {
+  allowWrite?: boolean;
+  allowedToolGroups?: string[];
+  escalationRole?: string;
+}
+
+export interface CustomAgentConfig {
+  role: string;
+  outputType?: "plan" | "patch" | "review" | "message";
+  systemPrompt: string;
+  provider?: LlmProviderName;
+  model?: string;
+  stacks?: string[];
+  globs?: string[];
+  write?: boolean;
+  policy?: AgentPolicyConfig;
+}
+
+export interface LoopConfig {
+  enabled?: boolean;
+  maxTurns?: number;
+  maxToolCalls?: number;
+  timeoutMs?: number;
+}
+
+export interface WorkflowConfig {
+  enabled?: boolean;
+  autoFromTechLeadPlan?: boolean;
+}
+
 export interface AiShellConfig {
   projectName?: string;
   provider?: LlmProviderName;
@@ -54,6 +84,9 @@ export interface AiShellConfig {
   maxSteps?: number;
   memory?: MemoryConfig;
   mcp?: McpConfig;
+  customAgents?: Record<string, CustomAgentConfig>;
+  loop?: LoopConfig;
+  workflow?: WorkflowConfig;
 }
 
 export interface AgentScope {

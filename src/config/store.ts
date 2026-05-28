@@ -37,6 +37,7 @@ export function ensureConfigFile(projectRoot: string): AiShellConfig {
         anthropic: "",
         huggingface: "",
         openrouter: "",
+        github: "",
       },
       models: {
         openai: {
@@ -81,6 +82,17 @@ export function ensureConfigFile(projectRoot: string): AiShellConfig {
       memory: {
         enabled: true,
         maxEntriesPerProject: 200,
+      },
+      customAgents: {},
+      loop: {
+        enabled: true,
+        maxTurns: 1,
+        maxToolCalls: 0,
+        timeoutMs: 30000,
+      },
+      workflow: {
+        enabled: true,
+        autoFromTechLeadPlan: true,
       },
     };
     writeConfigFile(projectRoot, initial);
@@ -183,6 +195,11 @@ export function getKeysStatus(config: AiShellConfig): KeysStatusLine[] {
         ? maskApiKey(config.keys.openrouter)
         : "(not set)",
       set: Boolean(config.keys?.openrouter),
+    },
+    {
+      label: "github",
+      value: config.keys?.github ? maskApiKey(config.keys.github) : "(not set)",
+      set: Boolean(config.keys?.github),
     },
     {
       label: "puter (proxy)",

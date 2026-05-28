@@ -26,6 +26,7 @@ import {
   getFailedRunLogs,
   listWorkflowRuns,
 } from "../git/ci.js";
+import { nextWorkflowTask, workflowSummaryLines, type WorkflowState } from "../core/workflow.js";
 
 const program = new Command();
 
@@ -267,6 +268,81 @@ program
       for (const line of lines) console.log(line);
     } finally {
       store.close();
+    }
+  });
+
+program
+  .command("workflow")
+  .description("Show persisted workflow state for latest session")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .argument("[sub]", "status|tasks|checkpoint|next", "status")
+  .action(async (sub: string, opts: { cwd: string }) => {
+    const root = path.resolve(opts.cwd);
+    const store = new MemoryStore();
+    try {
+      const session = await Session.create(root, store);
+      const raw = store.getSessionWorkflow(session.id);
+      if (!raw) {
+        console.log(chalk.gray("No active workflow."));
+        return;
+      }
+      const state = JSON.parse(raw) as WorkflowState;
+      if (sub === "tasks") {
+        for (const t of state.tasks) {
+          console.log(`[${t.status}] [${t.agent}] ${t.description}`);
+        }
+        return;
+      }
+      if (sub === "checkpoint") {
+        console.log(`Checkpoint: ${state.checkpoint}`);
+        return;
+      }
+      if (sub === "next") {
+        const nxt = nextWorkflowTask(state);
+        console.log(nxt ? `[${nxt.agent}] ${nxt.description}` : "No pending tasks.");
+        return;
+      }
+      for (const line of workflowSummaryLines(state)) console.log(line);
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("agents")
+  .description("List configured built-in/custom agent aliases")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .argument("[alias]", "Optional alias to inspect, e.g. nina")
+  .action((alias: string | undefined, opts: { cwd: string }) => {
+    const root = path.resolve(opts.cwd);
+    const config = loadConfig(root);
+    if (alias) {
+      const key = alias.replace(/^@/, "").toLowerCase();
+      const role = config.agents?.[key];
+      const custom = config.customAgents?.[key];
+      if (!role && !custom) {
+        console.log(chalk.red(`Unknown agent alias: @${key}`));
+        process.exit(1);
+      }
+      console.log(chalk.bold(`@${key}`));
+      if (role) console.log(`  role: ${role} (builtin)`);
+      if (custom) {
+        console.log(`  role: ${custom.role} (custom)`);
+        console.log(`  outputType: ${custom.outputType ?? "message"}`);
+        console.log(`  write: ${custom.write ? "true" : "false"}`);
+        console.log(`  stacks: ${(custom.stacks ?? ["*"]).join(", ")}`);
+        console.log(`  globs: ${(custom.globs ?? ["**/*"]).join(", ")}`);
+      }
+      return;
+    }
+    const aliases = Object.entries(config.agents ?? {});
+    const customs = Object.entries(config.customAgents ?? {});
+    console.log(chalk.bold("Agents:\n"));
+    for (const [a, r] of aliases) {
+      console.log(`  @${a} -> ${r} (builtin)`);
+    }
+    for (const [a, c] of customs) {
+      console.log(`  @${a} -> ${c.role} (custom)`);
     }
   });
 

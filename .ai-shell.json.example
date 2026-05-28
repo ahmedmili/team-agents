@@ -79,5 +79,32 @@
         }
       }
     }
+  },
+  "customAgents": {
+    "nina": {
+      "role": "security",
+      "outputType": "review",
+      "systemPrompt": "You are a security reviewer. Focus on risks, attack surface, and mitigations.",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "stacks": ["*"],
+      "globs": ["**/*"],
+      "write": false,
+      "policy": {
+        "allowWrite": false,
+        "allowedToolGroups": ["mcp", "ci"],
+        "escalationRole": "techLead"
+      }
+    }
+  },
+  "loop": {
+    "enabled": true,
+    "maxTurns": 1,
+    "maxToolCalls": 0,
+    "timeoutMs": 30000
+  },
+  "workflow": {
+    "enabled": true,
+    "autoFromTechLeadPlan": true
   }
 }

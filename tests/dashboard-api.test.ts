@@ -48,5 +48,10 @@ describe("dashboard api", () => {
     expect(ciRes.status).toBe(200);
     const ci = (await ciRes.json()) as { runs: unknown[] };
     expect(Array.isArray(ci.runs)).toBe(true);
+
+    const wfRes = await fetch(`${server.url}/api/workflow`);
+    expect(wfRes.status).toBe(200);
+    const wf = (await wfRes.json()) as { workflow: unknown | null };
+    expect("workflow" in wf).toBe(true);
   });
 });

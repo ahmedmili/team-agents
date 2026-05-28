@@ -1,11 +1,13 @@
 import { z } from "zod";
 
-export const AgentRoleSchema = z.enum([
+export const BuiltinAgentRoleSchema = z.enum([
   "techLead",
   "backend",
   "qa",
   "architect",
 ]);
+export const AgentRoleSchema = z.string().min(1);
+export type BuiltinAgentRole = z.infer<typeof BuiltinAgentRoleSchema>;
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
 
 export const TaskSchema = z.object({

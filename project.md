@@ -244,7 +244,7 @@ MCP tool integration (GitHub server + prefetch into prompts) (done)
 autonomous PR creation (`/pr`, `ai pr create` via gh) (done)
 CI/CD automation (`/ci`, `ai ci`, CI prefetch) (done)
 Phase 4
-full AI engineering organization simulation
+full AI engineering organization simulation (done: custom agents + loop engine + workflow layer)
 💡 Key Insight
 
 This project is NOT just a chatbot CLI.
@@ -452,7 +452,8 @@ Provider resolution:
 | Agent Markdown artifacts | Done |
 | Local dashboard + provider telemetry | Done (beyond original Phase 1 non-goals) |
 | MCP / PR / CI (Phase 3) | Done |
-| Custom agents / Ollama | Not started |
+| Phase 4 (custom agents + loop + workflow + governance telemetry) | Done |
+| Ollama | Not started |
 
 ### Agent artifacts
 
@@ -538,6 +539,17 @@ Flags: `--dry-run`, `--yes`, `--title`, `--body`, `--branch`, `--draft`, `--all-
 
 `/ci` lists recent GitHub Actions runs for the current branch; `/ci <run-id>` shows failed log excerpt. `ai ci` works outside the REPL. Dashboard: `GET /api/ci`.
 
+### AI organization workflow (Phase 4)
+
+Phase 4 adds configurable organization behavior:
+
+- **Custom agents** via `.ai-shell.json > customAgents` (`role`, `outputType`, `systemPrompt`, provider/model overrides, scope + policy).
+- **Bounded loop engine** via `.ai-shell.json > loop` (`maxTurns`, timeout) to iteratively refine `message` outputs with stop-reason traces persisted in `session_state.loop_trace_json`.
+- **Workflow layer** persisted in `session_state.workflow_json`, created from Tech Lead plans and visible through `/workflow`, `/workflow tasks`, `/workflow checkpoint`, `/workflow next`.
+- **Governance telemetry** for policy denials + workflow/loop context surfaced in `/status`, `/board`, and agent artifacts.
+
+Dashboard: `GET /api/workflow`.
+
 ### Session memory (rollup)
 
 After an orchestrated flow, a short **session memory summary** is also stored in `session_state.memory_summary` for the active session.
@@ -557,6 +569,7 @@ After an orchestrated flow, a short **session memory summary** is also stored in
 | `/mcp` | MCP server status |
 | `/pr [--yes]` | Create GitHub PR from applied patches |
 | `/ci [run-id]` | GitHub Actions runs / failed logs |
+| `/workflow [sub]` | Workflow status, tasks, checkpoint, next task |
 | `/dashboard`, `/metrics`, `/history` | Observability |
 
 ### Local dashboard (not cloud SaaS)

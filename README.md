@@ -44,6 +44,7 @@ add JWT authentication
 /mcp
 /pr --dry-run
 /ci
+/workflow
 /agents
 /exit
 ```
@@ -231,6 +232,7 @@ See [project.md](project.md) for vision, agent schemas, and Phase 1 scope.
 - MCP GitHub context prefetch — `/mcp`, `ai mcp status` (enable in `.ai-shell.json`)
 - PR workflow after `/apply` — `/pr`, `ai pr create` (requires `gh`)
 - CI visibility — `/ci`, `ai ci`, dashboard `GET /api/ci`
+- Phase 4 org simulation — custom agents (`customAgents`), bounded loops (`loop`), workflow board (`/workflow`, `ai workflow`)
 - `/sessions` for SQLite session history across projects
 - Repo scanner and stack detection
 - SQLite session memory (7-day resume)
