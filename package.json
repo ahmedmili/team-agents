@@ -18,11 +18,17 @@
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["ai", "cli", "multi-agent", "diff"],
+  "keywords": [
+    "ai",
+    "cli",
+    "multi-agent",
+    "diff"
+  ],
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@huggingface/inference": "^4.6.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.8.1",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",

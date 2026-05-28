@@ -43,5 +43,10 @@ describe("dashboard api", () => {
     expect(wsRes.status).toBe(200);
     const ws = (await wsRes.json()) as { workspaces: unknown[] };
     expect(Array.isArray(ws.workspaces)).toBe(true);
+
+    const ciRes = await fetch(`${server.url}/api/ci`);
+    expect(ciRes.status).toBe(200);
+    const ci = (await ciRes.json()) as { runs: unknown[] };
+    expect(Array.isArray(ci.runs)).toBe(true);
   });
 });

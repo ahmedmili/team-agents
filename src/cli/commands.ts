@@ -23,6 +23,14 @@ import {
 import type { AgentRole } from "../schemas/index.js";
 import { listAgentArtifacts } from "../core/artifacts.js";
 import { listWorkspaces } from "../config/workspaces.js";
+import type { McpManager } from "../mcp/client.js";
+import { mcpStatusLines } from "./mcp-status.js";
+import { createPullRequest, parsePrArgs } from "../git/pr.js";
+import {
+  formatCiRunsTable,
+  getFailedRunLogs,
+  listWorkflowRuns,
+} from "../git/ci.js";
 import fs from "fs-extra";
 import path from "node:path";
 
@@ -30,6 +38,7 @@ export interface CommandContext {
   session: Session;
   store: MemoryStore;
   registry: AgentRegistry;
+  getMcpManager?: () => McpManager | null;
   onExit: () => void;
   onRefresh: () => Promise<void>;
   onReloadConfig: () => void;
@@ -66,6 +75,12 @@ export async function handleCommand(
       return showWorkspaces();
     case "board":
       return showBoard(ctx);
+    case "mcp":
+      return await showMcp(ctx);
+    case "pr":
+      return await handlePr(ctx, args);
+    case "ci":
+      return await handleCi(ctx, args);
     case "memory":
       return handleMemory(ctx, args);
     case "status":
@@ -110,6 +125,9 @@ Commands:
   /workspaces        List pinned workspace registry
   /switch <path>     Hot-switch to another project (stays in REPL)
   /board             Active plan tasks and agent handoff log
+  /mcp               MCP server status and tools
+  /pr [--yes]        Create GitHub PR from applied patches (use --dry-run first)
+  /ci [run-id]       GitHub Actions runs for current branch
   /memory            List project memory (persists across sessions)
   /memory clear      Clear project memory for this repo
   /status            Session and task status
@@ -134,7 +152,61 @@ Outside shell:
   ai memory          List project memory for cwd
   ai switch <path>   Register project and exit (use /switch in REPL to stay)
   ai workspaces      List registered workspaces
+  ai mcp status      MCP servers (outside REPL)
+  ai pr create       Open PR from applied patches
+  ai ci              List workflow runs
 `.trim();
+}
+
+async function showMcp(ctx: CommandContext): Promise<string[]> {
+  const manager = ctx.getMcpManager?.() ?? null;
+  return mcpStatusLines(manager, ctx.session.config);
+}
+
+async function handlePr(
+  ctx: CommandContext,
+  args: string[],
+): Promise<string[]> {
+  const flags = parsePrArgs(args);
+  if (!flags.yes && !flags.dryRun) {
+    flags.dryRun = true;
+  }
+  try {
+    const result = await createPullRequest({
+      sessionId: ctx.session.id,
+      root: ctx.session.root,
+      store: ctx.store,
+      ...flags,
+    });
+    const lines = result.messages.map((m) =>
+      result.dryRun ? chalk.gray(m) : m.startsWith("Created") ? chalk.green(m) : m,
+    );
+    if (result.dryRun) {
+      lines.push(
+        chalk.yellow("\nThis was a dry run. Use /pr --yes to create the PR."),
+      );
+    }
+    return lines;
+  } catch (err) {
+    return [chalk.red(err instanceof Error ? err.message : String(err))];
+  }
+}
+
+async function handleCi(
+  ctx: CommandContext,
+  args: string[],
+): Promise<string[]> {
+  const runId = args[0];
+  try {
+    if (runId && !runId.startsWith("-")) {
+      const logs = await getFailedRunLogs(ctx.session.root, runId);
+      return [chalk.bold(`Failed logs for run ${runId}:`), "", logs];
+    }
+    const runs = await listWorkflowRuns(ctx.session.root, 5);
+    return formatCiRunsTable(runs);
+  } catch (err) {
+    return [chalk.red(err instanceof Error ? err.message : String(err))];
+  }
 }
 
 async function handleSwitch(
@@ -567,8 +639,19 @@ function showStatus(ctx: CommandContext): string[] {
     `Agent artifacts: ${artifacts.length}`,
     `Project memory entries: ${projectMemoryCount}`,
     `Memory capture: ${ctx.session.config.memory?.enabled !== false ? "on" : "off"}`,
+    `MCP: ${ctx.session.config.mcp?.enabled ? "on" : "off"}`,
     `Recent messages: ${msgs.length}`,
   ];
+
+  const prUrl = ctx.store.getSessionPrUrl(ctx.session.id);
+  if (prUrl) {
+    lines.push(`Last PR: ${prUrl}`);
+  }
+
+  const mcp = ctx.getMcpManager?.();
+  if (mcp?.lastPrefetchError) {
+    lines.push(chalk.yellow(`MCP prefetch error: ${mcp.lastPrefetchError}`));
+  }
 
   if (plan) {
     lines.push("", "Plan tasks:");

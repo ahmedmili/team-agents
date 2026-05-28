@@ -16,6 +16,7 @@ import {
   ensureConfigFile,
   readConfigFile,
 } from "./store.js";
+import { resolveMcpServers } from "../mcp/client.js";
 
 export { CONFIG_FILENAME };
 
@@ -61,6 +62,13 @@ export function loadConfig(projectRoot: string): AiShellConfig {
       maxEntriesPerProject:
         fileConfig.memory?.maxEntriesPerProject ?? 200,
     },
+    mcp: fileConfig.mcp
+      ? {
+          enabled: fileConfig.mcp.enabled ?? false,
+          prefetchOnRoute: fileConfig.mcp.prefetchOnRoute ?? true,
+          servers: resolveMcpServers(fileConfig.mcp.servers, fileConfig.keys),
+        }
+      : undefined,
   };
 }
 

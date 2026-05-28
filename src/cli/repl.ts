@@ -38,6 +38,7 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
     onReloadConfig: () => {
       runtime.reload();
     },
+    getMcpManager: () => runtime.mcpManager,
     onSwitchProject: async (newRoot: string) => {
       const resolved = path.resolve(newRoot);
       if (!fs.existsSync(resolved)) {
@@ -66,6 +67,7 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
   const loop = () => {
     if (exiting) {
       rl.close();
+      void runtime.close();
       store.close();
       return;
     }
@@ -81,6 +83,7 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
         for (const l of lines) console.log(l);
         if (exiting) {
           rl.close();
+          await runtime.close();
           store.close();
           return;
         }
@@ -98,9 +101,12 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
   });
 
   rl.on("close", () => {
-    if (!exiting) console.log(chalk.gray("\nSession saved."));
-    store.close();
-    process.exit(0);
+    void (async () => {
+      if (!exiting) console.log(chalk.gray("\nSession saved."));
+      await runtime.close();
+      store.close();
+      process.exit(0);
+    })();
   });
 
   loop();

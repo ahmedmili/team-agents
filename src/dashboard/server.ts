@@ -10,6 +10,7 @@ import {
   writeConfigFile,
 } from "../config/store.js";
 import { listWorkspaces } from "../config/workspaces.js";
+import { listWorkflowRuns } from "../git/ci.js";
 import { MemoryStore } from "../memory/store.js";
 import type { LlmProviderName } from "../config/types.js";
 import type { AgentRole } from "../schemas/index.js";
@@ -86,6 +87,17 @@ export async function startDashboardServer(projectRoot: string): Promise<Dashboa
       }
       if (req.method === "GET" && url.pathname === "/api/workspaces") {
         return sendJson(res, 200, { workspaces: listWorkspaces() });
+      }
+      if (req.method === "GET" && url.pathname === "/api/ci") {
+        try {
+          const runs = await listWorkflowRuns(projectRoot, 10);
+          return sendJson(res, 200, { runs });
+        } catch (err) {
+          return sendJson(res, 200, {
+            runs: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
       if (req.method === "GET" && url.pathname === "/api/memory") {
         const limit = Number(url.searchParams.get("limit") ?? "50");

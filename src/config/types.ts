@@ -1,4 +1,7 @@
 import type { AgentRole } from "../schemas/index.js";
+import type { McpConfig } from "../mcp/types.js";
+
+export type { McpConfig, McpServerConfig } from "../mcp/types.js";
 
 export type LlmProviderName =
   | "openai"
@@ -13,6 +16,7 @@ export interface ApiKeysConfig {
   anthropic?: string;
   huggingface?: string;
   openrouter?: string;
+  github?: string;
 }
 
 export interface AdapterConfig {
@@ -49,6 +53,7 @@ export interface AiShellConfig {
   agents?: Record<string, AgentRole | string>;
   maxSteps?: number;
   memory?: MemoryConfig;
+  mcp?: McpConfig;
 }
 
 export interface AgentScope {

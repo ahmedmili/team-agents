@@ -23,6 +23,8 @@ import {
   handoffFromAgentOutput,
   type HandoffEntry,
 } from "./handoff.js";
+import type { McpManager } from "../mcp/client.js";
+import { prefetchExternalContext } from "../mcp/prefetch.js";
 import chalk from "chalk";
 import fs from "fs-extra";
 import path from "node:path";
@@ -40,6 +42,7 @@ export class Orchestrator {
     private session: Session,
     private registry: AgentRegistry,
     private store: MemoryStore,
+    private mcpManager: McpManager | null = null,
   ) {}
 
   async handleRoute(route: RouteResult): Promise<string[]> {
@@ -165,7 +168,7 @@ export class Orchestrator {
 
     const handoffBlock =
       handoffOverride ?? formatHandoffBlock(this.handoffLog);
-    const input = this.buildInput(message, handoffBlock || undefined);
+    const input = await this.buildInput(message, handoffBlock || undefined);
     const output = await agent.run(input);
 
     this.store.saveMessage(this.session.id, "user", message, role);
@@ -215,10 +218,20 @@ export class Orchestrator {
     }
   }
 
-  private buildInput(message: string, agentHandoffs?: string): AgentInput {
+  private async buildInput(
+    message: string,
+    agentHandoffs?: string,
+  ): Promise<AgentInput> {
     const memorySummary = this.store.getSessionSummary(this.session.id);
     const projectEntries = this.store.getProjectMemories(this.session.root, 40);
     const projectMemory = formatProjectMemoryBlock(projectEntries);
+
+    const externalContext = await prefetchExternalContext(
+      this.mcpManager,
+      this.session.root,
+      message,
+      this.session.config,
+    );
 
     const recent = this.store
       .getMessages(this.session.id, 10)
@@ -238,6 +251,7 @@ export class Orchestrator {
       config: this.session.config,
       projectMemory: projectMemory || undefined,
       agentHandoffs,
+      externalContext: externalContext || undefined,
       conversationSummary,
     };
   }

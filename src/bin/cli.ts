@@ -18,6 +18,14 @@ import {
 } from "../config/workspaces.js";
 import { loadConfig } from "../config/loader.js";
 import { scanRepository } from "../repo/scanner.js";
+import { McpManager } from "../mcp/client.js";
+import { mcpStatusLines } from "../cli/mcp-status.js";
+import { createPullRequest, parsePrArgs } from "../git/pr.js";
+import {
+  formatCiRunsTable,
+  getFailedRunLogs,
+  listWorkflowRuns,
+} from "../git/ci.js";
 
 const program = new Command();
 
@@ -138,6 +146,107 @@ program
       console.log(`  ${chalk.cyan(w.name)}`);
       console.log(chalk.gray(`    ${w.cwd}`));
       console.log(chalk.gray(`    last opened: ${w.lastOpenedAt.slice(0, 19)}\n`));
+    }
+  });
+
+const mcpCmd = program.command("mcp").description("Model Context Protocol servers");
+
+mcpCmd
+  .command("status")
+  .description("Show MCP server connection status")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .action(async (opts: { cwd: string }) => {
+    const root = path.resolve(opts.cwd);
+    const config = loadConfig(root);
+    const manager = config.mcp?.enabled
+      ? new McpManager(config, root)
+      : null;
+    try {
+      const lines = await mcpStatusLines(manager, config);
+      for (const line of lines) console.log(line);
+    } finally {
+      await manager?.close();
+    }
+  });
+
+const prCmd = program
+  .command("pr")
+  .description("GitHub pull request workflow");
+
+prCmd
+  .command("create")
+  .description("Create a PR from applied patches in the latest session")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .option("--title <title>", "PR title")
+  .option("--body <body>", "PR body")
+  .option("--branch <branch>", "Feature branch name")
+  .option("--draft", "Open as draft PR")
+  .option("--yes", "Execute (default is dry-run)")
+  .option("--dry-run", "Show what would happen")
+  .option("--all-staged", "Commit all staged files instead of applied patches")
+  .action(async (opts: {
+    cwd: string;
+    title?: string;
+    body?: string;
+    branch?: string;
+    draft?: boolean;
+    yes?: boolean;
+    dryRun?: boolean;
+    allStaged?: boolean;
+  }) => {
+    const root = path.resolve(opts.cwd);
+    const store = new MemoryStore();
+    try {
+      const session = await Session.create(root, store);
+      const flags = {
+        title: opts.title,
+        body: opts.body,
+        branch: opts.branch,
+        draft: Boolean(opts.draft),
+        yes: Boolean(opts.yes),
+        dryRun: Boolean(opts.dryRun) || !opts.yes,
+        allStaged: Boolean(opts.allStaged),
+      };
+      const result = await createPullRequest({
+        sessionId: session.id,
+        root,
+        store,
+        ...flags,
+      });
+      for (const m of result.messages) console.log(m);
+      if (result.dryRun) {
+        console.log(chalk.yellow("\nDry run. Pass --yes to create the PR."));
+      }
+    } catch (err) {
+      console.error(
+        chalk.red(err instanceof Error ? err.message : String(err)),
+      );
+      process.exit(1);
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("ci")
+  .description("GitHub Actions workflow runs for current branch")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .argument("[runId]", "Show failed logs for a run id")
+  .action(async (runId: string | undefined, opts: { cwd: string }) => {
+    const root = path.resolve(opts.cwd);
+    try {
+      if (runId) {
+        const logs = await getFailedRunLogs(root, runId);
+        console.log(logs);
+        return;
+      }
+      const runs = await listWorkflowRuns(root, 5);
+      for (const line of formatCiRunsTable(runs)) console.log(line);
+    } catch (err) {
+      console.error(
+        chalk.red(err instanceof Error ? err.message : String(err)),
+      );
+      process.exit(1);
     }
   });
 

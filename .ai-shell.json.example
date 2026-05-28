@@ -5,7 +5,8 @@
     "openai": "sk-your-openai-key-here",
     "anthropic": "sk-ant-your-anthropic-key-here",
     "huggingface": "hf_your_huggingface_token_here",
-    "openrouter": "or-your-openrouter-key-here"
+    "openrouter": "or-your-openrouter-key-here",
+    "github": "ghp_your_github_pat_here"
   },
   "models": {
     "openai": {
@@ -65,5 +66,18 @@
   "memory": {
     "enabled": true,
     "maxEntriesPerProject": 200
+  },
+  "mcp": {
+    "enabled": false,
+    "prefetchOnRoute": true,
+    "servers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "${keys.github}"
+        }
+      }
+    }
   }
 }

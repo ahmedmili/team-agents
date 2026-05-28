@@ -240,9 +240,9 @@ Phase 2
 project memory engine (done)
 multi-project support (done — `/switch`, `/workspaces`, `ai switch`, `ai workspaces`, last-active connect)
 Phase 3
-MCP tool integration (GitHub, Jira, etc.)
-autonomous PR creation
-CI/CD automation
+MCP tool integration (GitHub server + prefetch into prompts) (done)
+autonomous PR creation (`/pr`, `ai pr create` via gh) (done)
+CI/CD automation (`/ci`, `ai ci`, CI prefetch) (done)
 Phase 4
 full AI engineering organization simulation
 💡 Key Insight
@@ -451,7 +451,8 @@ Provider resolution:
 | Session memory summary (per-session rollup) | Done |
 | Agent Markdown artifacts | Done |
 | Local dashboard + provider telemetry | Done (beyond original Phase 1 non-goals) |
-| MCP / autonomous PR / custom agents / Ollama | Not started (non-goals) |
+| MCP / PR / CI (Phase 3) | Done |
+| Custom agents / Ollama | Not started |
 
 ### Agent artifacts
 
@@ -519,6 +520,24 @@ Registry file: `~/.ai-shell/workspaces.json` (`lastActive` + pinned projects).
 
 Dashboard: `GET /api/workspaces`.
 
+### MCP integration (Phase 3)
+
+Config `mcp.enabled` spawns stdio MCP servers (default: `@modelcontextprotocol/server-github`). On each agent route, issue/PR references in the user message trigger tool prefetch; results are injected as `externalContext` (capped ~2k chars). CI-related messages also attach the latest failed workflow summary when `gh` is available.
+
+**Commands:** `/mcp`, `ai mcp status`
+
+**Keys:** `keys.github` — PAT for the GitHub MCP server (`${keys.github}` in server env).
+
+### PR workflow (Phase 3)
+
+After `/apply`, `/pr` (dry-run by default) or `ai pr create --yes` creates a branch, commits **applied patch files only**, pushes, and opens a PR via `gh`. Requires `gh auth login`. PR URL stored in `session_state.pr_url`.
+
+Flags: `--dry-run`, `--yes`, `--title`, `--body`, `--branch`, `--draft`, `--all-staged`
+
+### CI visibility (Phase 3)
+
+`/ci` lists recent GitHub Actions runs for the current branch; `/ci <run-id>` shows failed log excerpt. `ai ci` works outside the REPL. Dashboard: `GET /api/ci`.
+
 ### Session memory (rollup)
 
 After an orchestrated flow, a short **session memory summary** is also stored in `session_state.memory_summary` for the active session.
@@ -535,6 +554,9 @@ After an orchestrated flow, a short **session memory summary** is also stored in
 | `/workspaces` | Pinned workspace registry |
 | `/switch <path>` | Hot-switch project in REPL |
 | `/board` | Plan tasks + agent handoff log |
+| `/mcp` | MCP server status |
+| `/pr [--yes]` | Create GitHub PR from applied patches |
+| `/ci [run-id]` | GitHub Actions runs / failed logs |
 | `/dashboard`, `/metrics`, `/history` | Observability |
 
 ### Local dashboard (not cloud SaaS)

@@ -41,6 +41,9 @@ add JWT authentication
 /workspaces
 /switch ../other-project
 /board
+/mcp
+/pr --dry-run
+/ci
 /agents
 /exit
 ```
@@ -225,6 +228,9 @@ See [project.md](project.md) for vision, agent schemas, and Phase 1 scope.
 - Session memory summary injected into later prompts
 - Multi-project workspaces — `/switch`, `/workspaces`, `ai switch`, `ai workspaces`; `ai connect` resumes last active project
 - Agent handoffs in orchestrated flows — `/board` for plan + handoff log
+- MCP GitHub context prefetch — `/mcp`, `ai mcp status` (enable in `.ai-shell.json`)
+- PR workflow after `/apply` — `/pr`, `ai pr create` (requires `gh`)
+- CI visibility — `/ci`, `ai ci`, dashboard `GET /api/ci`
 - `/sessions` for SQLite session history across projects
 - Repo scanner and stack detection
 - SQLite session memory (7-day resume)

@@ -5,12 +5,14 @@ import { AgentRegistry } from "../agents/registry.js";
 import { Router } from "./router.js";
 import { Orchestrator } from "./orchestrator.js";
 import { LlmRegistry } from "../llm/registry.js";
+import { McpManager } from "../mcp/client.js";
 
 /** REPL runtime — recreated when config/keys change. */
 export class ReplRuntime {
   registry!: AgentRegistry;
   router!: Router;
   orchestrator!: Orchestrator;
+  mcpManager: McpManager | null = null;
 
   constructor(
     public session: Session,
@@ -19,8 +21,22 @@ export class ReplRuntime {
     this.reload();
   }
 
+  async close(): Promise<void> {
+    if (this.mcpManager) {
+      await this.mcpManager.close();
+      this.mcpManager = null;
+    }
+  }
+
   reload(): void {
+    const previous = this.mcpManager;
+    this.mcpManager = null;
+    void previous?.close();
+
     this.session.config = loadConfig(this.session.root);
+    this.mcpManager = this.session.config.mcp?.enabled
+      ? new McpManager(this.session.config, this.session.root)
+      : null;
     const llmRegistry = new LlmRegistry(this.session.config, (event) => {
       this.store.saveProviderEvent({
         session_id: this.session.id,
@@ -38,6 +54,7 @@ export class ReplRuntime {
       this.session,
       this.registry,
       this.store,
+      this.mcpManager,
     );
   }
 }

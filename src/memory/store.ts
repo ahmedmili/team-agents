@@ -132,6 +132,11 @@ export class MemoryStore {
     } catch {
       // column already exists
     }
+    try {
+      this.db.exec(`ALTER TABLE session_state ADD COLUMN pr_url TEXT`);
+    } catch {
+      // column already exists
+    }
   }
 
   private normalizeCwd(cwd: string): string {
@@ -221,8 +226,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            plan_json = excluded.plan_json,
            updated_at = excluded.updated_at`,
@@ -232,6 +237,7 @@ export class MemoryStore {
         JSON.stringify(plan),
         existing?.memory_summary ?? null,
         existing?.handoff_json ?? null,
+        existing?.pr_url ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -241,8 +247,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            handoff_json = excluded.handoff_json,
            updated_at = excluded.updated_at`,
@@ -252,9 +258,36 @@ export class MemoryStore {
         existing?.plan_json ?? null,
         existing?.memory_summary ?? null,
         JSON.stringify(handoffs),
+        existing?.pr_url ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
+  }
+
+  saveSessionPrUrl(sessionId: string, prUrl: string): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           pr_url = excluded.pr_url,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        existing?.plan_json ?? null,
+        existing?.memory_summary ?? null,
+        existing?.handoff_json ?? null,
+        prUrl,
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionPrUrl(sessionId: string): string | null {
+    const row = this.getSessionStateRow(sessionId);
+    return row?.pr_url ?? null;
   }
 
   getSessionHandoffs(sessionId: string): HandoffEntry[] {
@@ -277,8 +310,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, pr_url, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            memory_summary = excluded.memory_summary,
            updated_at = excluded.updated_at`,
@@ -288,6 +321,7 @@ export class MemoryStore {
         existing?.plan_json ?? null,
         summary.slice(0, 4000),
         existing?.handoff_json ?? null,
+        existing?.pr_url ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -413,16 +447,18 @@ export class MemoryStore {
     plan_json: string | null;
     memory_summary: string | null;
     handoff_json: string | null;
+    pr_url: string | null;
   } | null {
     const row = this.db
       .prepare(
-        `SELECT plan_json, memory_summary, handoff_json FROM session_state WHERE session_id = ?`,
+        `SELECT plan_json, memory_summary, handoff_json, pr_url FROM session_state WHERE session_id = ?`,
       )
       .get(sessionId) as
       | {
           plan_json: string | null;
           memory_summary: string | null;
           handoff_json: string | null;
+          pr_url: string | null;
         }
       | undefined;
     return row ?? null;

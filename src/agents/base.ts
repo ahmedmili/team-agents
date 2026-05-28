@@ -12,6 +12,8 @@ export interface AgentInput {
   projectMemory?: string;
   /** Structured summaries from other agents in this run (or recent session). */
   agentHandoffs?: string;
+  /** MCP / CI prefetch (untrusted external data). */
+  externalContext?: string;
   conversationSummary?: string;
 }
 
@@ -35,6 +37,9 @@ export function buildMessages(
   }
   if (input.agentHandoffs?.trim()) {
     contextParts.push(`[${input.agentHandoffs.trim()}]`);
+  }
+  if (input.externalContext?.trim()) {
+    contextParts.push(input.externalContext.trim());
   }
   if (input.conversationSummary?.trim()) {
     contextParts.push(input.conversationSummary.trim());
