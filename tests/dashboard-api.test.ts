@@ -32,5 +32,16 @@ describe("dashboard api", () => {
     expect(sessionsRes.status).toBe(200);
     const sessions = (await sessionsRes.json()) as { sessions: unknown[] };
     expect(Array.isArray(sessions.sessions)).toBe(true);
+
+    const memRes = await fetch(`${server.url}/api/memory?limit=10`);
+    expect(memRes.status).toBe(200);
+    const mem = (await memRes.json()) as { memories: unknown[]; count: number };
+    expect(Array.isArray(mem.memories)).toBe(true);
+    expect(typeof mem.count).toBe("number");
+
+    const wsRes = await fetch(`${server.url}/api/workspaces`);
+    expect(wsRes.status).toBe(200);
+    const ws = (await wsRes.json()) as { workspaces: unknown[] };
+    expect(Array.isArray(ws.workspaces)).toBe(true);
   });
 });

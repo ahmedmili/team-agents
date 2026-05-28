@@ -1,24 +1,30 @@
 import readline from "node:readline";
 import chalk from "chalk";
 import { parseInput } from "../core/parser.js";
-import { formatPrompt, type Session } from "../core/session.js";
+import { formatPrompt, Session, type Session as SessionType } from "../core/session.js";
+import { ensureConfigFile } from "../config/store.js";
+import path from "node:path";
+import fs from "fs-extra";
 import type { MemoryStore } from "../memory/store.js";
 import { handleCommand, type CommandContext } from "./commands.js";
 import { ReplRuntime } from "../core/runtime.js";
 import { formatErrorMessage } from "../utils/errors.js";
 
 export interface ReplDeps {
-  session: Session;
+  session: SessionType;
   store: MemoryStore;
   runtime: ReplRuntime;
 }
 
 export async function startRepl(deps: ReplDeps): Promise<void> {
-  const { session, store, runtime } = deps;
+  const { store, runtime } = deps;
+  let session = deps.session;
 
   let exiting = false;
   const ctx: CommandContext = {
-    session,
+    get session() {
+      return session;
+    },
     store,
     get registry() {
       return runtime.registry;
@@ -31,6 +37,19 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
     },
     onReloadConfig: () => {
       runtime.reload();
+    },
+    onSwitchProject: async (newRoot: string) => {
+      const resolved = path.resolve(newRoot);
+      if (!fs.existsSync(resolved)) {
+        throw new Error(`Path not found: ${resolved}`);
+      }
+      ensureConfigFile(resolved);
+      const newSession = await Session.create(resolved, store);
+      session = newSession;
+      deps.session = newSession;
+      runtime.session = newSession;
+      runtime.reload();
+      printBanner(session);
     },
   };
 
@@ -87,7 +106,7 @@ export async function startRepl(deps: ReplDeps): Promise<void> {
   loop();
 }
 
-function printBanner(session: Session): void {
+export function printBanner(session: SessionType): void {
   console.log(chalk.bold("\nAI Shell — connected"));
   console.log(chalk.gray(`Root: ${session.root}`));
   console.log(chalk.gray(`Stacks: ${session.profile.stacks.join(", ")}`));

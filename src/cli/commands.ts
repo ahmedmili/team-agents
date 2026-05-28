@@ -22,6 +22,7 @@ import {
 } from "../config/loader.js";
 import type { AgentRole } from "../schemas/index.js";
 import { listAgentArtifacts } from "../core/artifacts.js";
+import { listWorkspaces } from "../config/workspaces.js";
 import fs from "fs-extra";
 import path from "node:path";
 
@@ -32,6 +33,7 @@ export interface CommandContext {
   onExit: () => void;
   onRefresh: () => Promise<void>;
   onReloadConfig: () => void;
+  onSwitchProject?: (newRoot: string) => Promise<void>;
 }
 
 export async function handleCommand(
@@ -58,6 +60,14 @@ export async function handleCommand(
       return showArtifacts(ctx, args);
     case "sessions":
       return showSessions(ctx);
+    case "switch":
+      return await handleSwitch(ctx, args);
+    case "workspaces":
+      return showWorkspaces();
+    case "board":
+      return showBoard(ctx);
+    case "memory":
+      return handleMemory(ctx, args);
     case "status":
       return showStatus(ctx);
     case "agents":
@@ -97,6 +107,11 @@ Commands:
   /reject [id|all]   Reject pending patches (no file changes)
   /artifacts [n]     List agent report files (.md); optional preview of latest
   /sessions          List recent project sessions (multi-project)
+  /workspaces        List pinned workspace registry
+  /switch <path>     Hot-switch to another project (stays in REPL)
+  /board             Active plan tasks and agent handoff log
+  /memory            List project memory (persists across sessions)
+  /memory clear      Clear project memory for this repo
   /status            Session and task status
   /agents            List agent aliases
   /keys              Show API keys (masked)
@@ -116,7 +131,129 @@ Agent:   @karim implement feature
 
 Outside shell:
   ai config keys | set-key | set-provider | set-agent | providers | init
+  ai memory          List project memory for cwd
+  ai switch <path>   Register project and exit (use /switch in REPL to stay)
+  ai workspaces      List registered workspaces
 `.trim();
+}
+
+async function handleSwitch(
+  ctx: CommandContext,
+  args: string[],
+): Promise<string[]> {
+  if (!args[0]) {
+    return [chalk.red("Usage: /switch <path>")];
+  }
+  if (!ctx.onSwitchProject) {
+    return [chalk.red("Project switch is only available in the interactive shell.")];
+  }
+  try {
+    await ctx.onSwitchProject(path.resolve(args[0]));
+    return [chalk.green(`Switched to ${ctx.session.root}`)];
+  } catch (err) {
+    return [
+      chalk.red(err instanceof Error ? err.message : String(err)),
+    ];
+  }
+}
+
+function showWorkspaces(): string[] {
+  const entries = listWorkspaces();
+  if (!entries.length) {
+    return [
+      chalk.gray("No workspaces registered yet."),
+      chalk.gray("Connect to a project with `ai connect` to register it."),
+    ];
+  }
+  const lines = ["Registered workspaces:", ""];
+  for (const w of entries) {
+    lines.push(
+      `  ${w.name} — ${w.cwd}`,
+      chalk.gray(`    last opened: ${w.lastOpenedAt.slice(0, 19)}`),
+    );
+  }
+  return lines;
+}
+
+function showBoard(ctx: CommandContext): string[] {
+  const plan = ctx.store.getSessionPlan(ctx.session.id);
+  const handoffs = ctx.store.getSessionHandoffs(ctx.session.id);
+  const lines: string[] = [chalk.bold("Task board"), ""];
+
+  if (plan?.tasks?.length) {
+    lines.push("Plan tasks:");
+    for (const t of plan.tasks) {
+      const mark = t.status === "done" ? chalk.green("✓") : chalk.gray("○");
+      lines.push(`  ${mark} [${t.agent}] ${t.description}`);
+    }
+    lines.push("");
+  } else {
+    lines.push(chalk.gray("No active plan. Run a tech-lead flow to create tasks."));
+    lines.push("");
+  }
+
+  if (handoffs.length) {
+    lines.push("Agent handoffs (this session):");
+    for (const h of handoffs) {
+      lines.push(
+        chalk.gray(`  [${h.at.slice(0, 19)}]`) +
+          ` [${h.agent}] ${h.type}: ${h.brief.slice(0, 120)}`,
+      );
+    }
+  } else {
+    lines.push(chalk.gray("No handoff log yet."));
+  }
+
+  lines.push("", chalk.gray("Full reports: /artifacts"));
+  return lines;
+}
+
+/** Shared formatter for REPL / CLI project memory listing. */
+export function projectMemoryLines(
+  store: MemoryStore,
+  cwd: string,
+  options: { limit?: number; clear?: boolean } = {},
+): string[] {
+  const limit = options.limit ?? 20;
+
+  if (options.clear) {
+    const removed = store.clearProjectMemory(cwd);
+    return [
+      chalk.green(`Cleared ${removed} project memory entries.`),
+      chalk.gray(`Project: ${cwd}`),
+    ];
+  }
+
+  const count = store.getProjectMemoryCount(cwd);
+  const entries = store.getProjectMemories(cwd, limit);
+
+  if (!entries.length) {
+    return [
+      chalk.gray("No project memory yet."),
+      chalk.gray("Memory is captured automatically after agent runs."),
+    ];
+  }
+
+  const lines = [
+    `Project memory (${count} entries, showing ${entries.length}):`,
+    chalk.gray(`Project: ${cwd}`),
+    "",
+  ];
+
+  for (const e of entries) {
+    const agent = e.sourceAgent ? ` [${e.sourceAgent}]` : "";
+    lines.push(
+      chalk.gray(`  [${e.createdAt.slice(0, 19)}]`) +
+        ` (${e.kind})${agent} ${e.content.slice(0, 120)}`,
+    );
+  }
+
+  return lines;
+}
+
+function handleMemory(ctx: CommandContext, args: string[]): string[] {
+  const clear = args[0]?.toLowerCase() === "clear";
+  return projectMemoryLines(ctx.store, ctx.session.root, { clear });
 }
 
 function showKeys(ctx: CommandContext): string[] {
@@ -407,6 +544,8 @@ function showStatus(ctx: CommandContext): string[] {
   const plan = ctx.store.getSessionPlan(ctx.session.id);
   const memorySummary = ctx.store.getSessionSummary(ctx.session.id);
   const artifacts = listAgentArtifacts(ctx.session.root, ctx.session.id);
+  const projectMemoryCount = ctx.store.getProjectMemoryCount(ctx.session.root);
+  const latestProjectMemory = ctx.store.getProjectMemories(ctx.session.root, 1)[0];
   const openai = ctx.session.config.keys?.openai;
   const anthropic = ctx.session.config.keys?.anthropic;
   const huggingface = ctx.session.config.keys?.huggingface;
@@ -426,6 +565,8 @@ function showStatus(ctx: CommandContext): string[] {
     `Applied patches: ${applied.length}`,
     `Rejected patches: ${rejected.length}`,
     `Agent artifacts: ${artifacts.length}`,
+    `Project memory entries: ${projectMemoryCount}`,
+    `Memory capture: ${ctx.session.config.memory?.enabled !== false ? "on" : "off"}`,
     `Recent messages: ${msgs.length}`,
   ];
 
@@ -437,6 +578,15 @@ function showStatus(ctx: CommandContext): string[] {
   }
   if (memorySummary) {
     lines.push("", "Session memory:", chalk.gray(memorySummary.slice(0, 300)));
+  }
+  if (latestProjectMemory) {
+    lines.push(
+      "",
+      "Latest project memory:",
+      chalk.gray(
+        `(${latestProjectMemory.kind}) ${latestProjectMemory.content.slice(0, 200)}`,
+      ),
+    );
   }
 
   return lines;

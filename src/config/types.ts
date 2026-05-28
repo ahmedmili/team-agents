@@ -33,6 +33,11 @@ export type ProviderModelsConfig = Partial<
   Record<LlmProviderName, Partial<Record<AgentRole, string>>>
 >;
 
+export interface MemoryConfig {
+  enabled?: boolean;
+  maxEntriesPerProject?: number;
+}
+
 export interface AiShellConfig {
   projectName?: string;
   provider?: LlmProviderName;
@@ -43,6 +48,7 @@ export interface AiShellConfig {
   adapterConfig?: AdapterConfig;
   agents?: Record<string, AgentRole | string>;
   maxSteps?: number;
+  memory?: MemoryConfig;
 }
 
 export interface AgentScope {

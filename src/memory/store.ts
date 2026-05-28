@@ -3,11 +3,21 @@ import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
+import type { HandoffEntry } from "../core/handoff.js";
 import type { PatchRecord, PlanOutput, ProjectProfile } from "../schemas/index.js";
 import type { AgentRole } from "../schemas/index.js";
 import type { LlmProviderName } from "../config/types.js";
+import type {
+  AppendProjectMemoryInput,
+  ProjectMemoryEntry,
+  ProjectMemoryKind,
+} from "./types.js";
+import { DEFAULT_MAX_ENTRIES_PER_PROJECT } from "./types.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type { ProjectMemoryEntry, ProjectMemoryKind, AppendProjectMemoryInput };
+export { DEFAULT_MAX_ENTRIES_PER_PROJECT };
 
 export interface SessionRow {
   id: string;
@@ -106,7 +116,26 @@ export class MemoryStore {
         updated_at TEXT NOT NULL,
         FOREIGN KEY (session_id) REFERENCES sessions(id)
       );
+      CREATE TABLE IF NOT EXISTS project_memory (
+        id TEXT PRIMARY KEY,
+        cwd TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL,
+        source_session_id TEXT,
+        source_agent TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_memory_cwd ON project_memory(cwd);
     `);
+    try {
+      this.db.exec(`ALTER TABLE session_state ADD COLUMN handoff_json TEXT`);
+    } catch {
+      // column already exists
+    }
+  }
+
+  private normalizeCwd(cwd: string): string {
+    return path.resolve(cwd).replace(/\\/g, "/");
   }
 
   getOrCreateSession(cwd: string, projectName: string): SessionRow {
@@ -192,8 +221,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, updated_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            plan_json = excluded.plan_json,
            updated_at = excluded.updated_at`,
@@ -202,9 +231,40 @@ export class MemoryStore {
         sessionId,
         JSON.stringify(plan),
         existing?.memory_summary ?? null,
+        existing?.handoff_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
+  }
+
+  saveSessionHandoffs(sessionId: string, handoffs: HandoffEntry[]): void {
+    const existing = this.getSessionStateRow(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           handoff_json = excluded.handoff_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        existing?.plan_json ?? null,
+        existing?.memory_summary ?? null,
+        JSON.stringify(handoffs),
+        new Date().toISOString(),
+      );
+    this.touchSession(sessionId);
+  }
+
+  getSessionHandoffs(sessionId: string): HandoffEntry[] {
+    const row = this.getSessionStateRow(sessionId);
+    if (!row?.handoff_json) return [];
+    try {
+      return JSON.parse(row.handoff_json) as HandoffEntry[];
+    } catch {
+      return [];
+    }
   }
 
   getSessionPlan(sessionId: string): PlanOutput | null {
@@ -217,8 +277,8 @@ export class MemoryStore {
     const existing = this.getSessionStateRow(sessionId);
     this.db
       .prepare(
-        `INSERT INTO session_state (session_id, plan_json, memory_summary, updated_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO session_state (session_id, plan_json, memory_summary, handoff_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            memory_summary = excluded.memory_summary,
            updated_at = excluded.updated_at`,
@@ -227,6 +287,7 @@ export class MemoryStore {
         sessionId,
         existing?.plan_json ?? null,
         summary.slice(0, 4000),
+        existing?.handoff_json ?? null,
         new Date().toISOString(),
       );
     this.touchSession(sessionId);
@@ -237,16 +298,132 @@ export class MemoryStore {
     return row?.memory_summary ?? null;
   }
 
+  appendProjectMemory(
+    cwd: string,
+    entry: AppendProjectMemoryInput,
+    maxEntries = DEFAULT_MAX_ENTRIES_PER_PROJECT,
+  ): ProjectMemoryEntry | null {
+    const normalized = this.normalizeCwd(cwd);
+    const content = entry.content.trim();
+    if (!content) return null;
+
+    if (this.hasRecentDuplicate(normalized, entry.kind, content)) {
+      return null;
+    }
+
+    const row: ProjectMemoryEntry = {
+      id: uuidv4(),
+      cwd: normalized,
+      kind: entry.kind,
+      content: content.slice(0, 2000),
+      sourceSessionId: entry.sourceSessionId ?? null,
+      sourceAgent: entry.sourceAgent ?? null,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.db
+      .prepare(
+        `INSERT INTO project_memory (id, cwd, kind, content, source_session_id, source_agent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.cwd,
+        row.kind,
+        row.content,
+        row.sourceSessionId,
+        row.sourceAgent,
+        row.createdAt,
+      );
+
+    this.pruneProjectMemory(normalized, maxEntries);
+    return row;
+  }
+
+  hasRecentDuplicate(
+    cwd: string,
+    kind: ProjectMemoryKind,
+    content: string,
+    lookback = 50,
+  ): boolean {
+    const normalized = this.normalizeCwd(cwd);
+    const recent = this.getProjectMemories(normalized, lookback);
+    const needle = content.trim().slice(0, 2000);
+    return recent.some((r) => r.kind === kind && r.content === needle);
+  }
+
+  getProjectMemories(
+    cwd: string,
+    limit = 50,
+    kinds?: ProjectMemoryKind[],
+  ): ProjectMemoryEntry[] {
+    const normalized = this.normalizeCwd(cwd);
+    if (kinds?.length) {
+      const placeholders = kinds.map(() => "?").join(", ");
+      return (
+        this.db
+          .prepare(
+            `SELECT * FROM project_memory WHERE cwd = ? AND kind IN (${placeholders})
+             ORDER BY created_at DESC LIMIT ?`,
+          )
+          .all(normalized, ...kinds, limit) as ProjectMemoryDbRow[]
+      ).map(rowToProjectMemory);
+    }
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM project_memory WHERE cwd = ? ORDER BY created_at DESC LIMIT ?`,
+        )
+        .all(normalized, limit) as ProjectMemoryDbRow[]
+    ).map(rowToProjectMemory);
+  }
+
+  getProjectMemoryCount(cwd: string): number {
+    const normalized = this.normalizeCwd(cwd);
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM project_memory WHERE cwd = ?`)
+      .get(normalized) as { count: number };
+    return row.count;
+  }
+
+  clearProjectMemory(cwd: string): number {
+    const normalized = this.normalizeCwd(cwd);
+    const result = this.db
+      .prepare(`DELETE FROM project_memory WHERE cwd = ?`)
+      .run(normalized);
+    return result.changes;
+  }
+
+  private pruneProjectMemory(cwd: string, maxEntries: number): void {
+    const count = this.getProjectMemoryCount(cwd);
+    if (count <= maxEntries) return;
+
+    const excess = count - maxEntries;
+    this.db
+      .prepare(
+        `DELETE FROM project_memory WHERE id IN (
+           SELECT id FROM project_memory WHERE cwd = ?
+           ORDER BY created_at ASC LIMIT ?
+         )`,
+      )
+      .run(cwd, excess);
+  }
+
   private getSessionStateRow(sessionId: string): {
     plan_json: string | null;
     memory_summary: string | null;
+    handoff_json: string | null;
   } | null {
     const row = this.db
       .prepare(
-        `SELECT plan_json, memory_summary FROM session_state WHERE session_id = ?`,
+        `SELECT plan_json, memory_summary, handoff_json FROM session_state WHERE session_id = ?`,
       )
       .get(sessionId) as
-      | { plan_json: string | null; memory_summary: string | null }
+      | {
+          plan_json: string | null;
+          memory_summary: string | null;
+          handoff_json: string | null;
+        }
       | undefined;
     return row ?? null;
   }
@@ -404,6 +581,28 @@ interface PatchDbRow {
   status: string;
   created_at: string;
   backup_path: string | null;
+}
+
+interface ProjectMemoryDbRow {
+  id: string;
+  cwd: string;
+  kind: string;
+  content: string;
+  source_session_id: string | null;
+  source_agent: string | null;
+  created_at: string;
+}
+
+function rowToProjectMemory(row: ProjectMemoryDbRow): ProjectMemoryEntry {
+  return {
+    id: row.id,
+    cwd: row.cwd,
+    kind: row.kind as ProjectMemoryKind,
+    content: row.content,
+    sourceSessionId: row.source_session_id,
+    sourceAgent: row.source_agent as AgentRole | null,
+    createdAt: row.created_at,
+  };
 }
 
 function rowToPatch(row: PatchDbRow): PatchRecord {

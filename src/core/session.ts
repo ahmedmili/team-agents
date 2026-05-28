@@ -7,6 +7,7 @@ import type { ProjectProfile, PatchRecord } from "../schemas/index.js";
 import type { MemoryStore, SessionRow } from "../memory/store.js";
 import { scanRepository } from "../repo/scanner.js";
 import { loadConfig } from "../config/loader.js";
+import { registerWorkspace } from "../config/workspaces.js";
 
 export class Session {
   readonly root: string;
@@ -45,6 +46,7 @@ export class Session {
     const projectName = config.projectName ?? profile.name;
     const row = store.getOrCreateSession(root, projectName);
     store.saveProjectProfile(row.id, profile);
+    registerWorkspace(root, projectName);
     return new Session(root, config, row, profile);
   }
 

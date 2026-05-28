@@ -9,6 +9,7 @@ import {
   setProvider,
   writeConfigFile,
 } from "../config/store.js";
+import { listWorkspaces } from "../config/workspaces.js";
 import { MemoryStore } from "../memory/store.js";
 import type { LlmProviderName } from "../config/types.js";
 import type { AgentRole } from "../schemas/index.js";
@@ -82,6 +83,18 @@ export async function startDashboardServer(projectRoot: string): Promise<Dashboa
       }
       if (req.method === "GET" && url.pathname === "/api/history/patches") {
         return sendJson(res, 200, { patches: store.getRecentPatches(200) });
+      }
+      if (req.method === "GET" && url.pathname === "/api/workspaces") {
+        return sendJson(res, 200, { workspaces: listWorkspaces() });
+      }
+      if (req.method === "GET" && url.pathname === "/api/memory") {
+        const limit = Number(url.searchParams.get("limit") ?? "50");
+        const memories = store.getProjectMemories(projectRoot, limit);
+        return sendJson(res, 200, {
+          cwd: projectRoot,
+          count: store.getProjectMemoryCount(projectRoot),
+          memories,
+        });
       }
       if (req.method === "GET" && url.pathname === "/api/health/runtime") {
         const sessions = store.getRecentSessions(1);
@@ -195,14 +208,17 @@ function renderHistoryPage(): string {
 <h3>Sessions</h3><pre id="sessions"></pre>
 <h3>Messages</h3><pre id="messages"></pre>
 <h3>Patches</h3><pre id="patches"></pre>
+<h3>Project memory</h3><pre id="memory"></pre>
 <script>
 async function loadAll(){
   const s=await (await fetch('/api/history/sessions')).json();
   const m=await (await fetch('/api/history/messages')).json();
   const p=await (await fetch('/api/history/patches')).json();
+  const mem=await (await fetch('/api/memory?limit=50')).json();
   document.getElementById('sessions').textContent=JSON.stringify(s.sessions,null,2);
   document.getElementById('messages').textContent=JSON.stringify(m.messages,null,2);
   document.getElementById('patches').textContent=JSON.stringify(p.patches,null,2);
+  document.getElementById('memory').textContent=JSON.stringify(mem,null,2);
 }
 loadAll();
 </script>`,

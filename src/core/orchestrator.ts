@@ -16,6 +16,13 @@ import type { Session } from "./session.js";
 import type { RouteResult } from "./router.js";
 import type { AgentInput } from "../agents/base.js";
 import { ensureDefaultPlanTasks, isAnalysisRequest } from "./plan-utils.js";
+import { extractMemoryEntries } from "../memory/capture.js";
+import { formatProjectMemoryBlock } from "../memory/context.js";
+import {
+  formatHandoffBlock,
+  handoffFromAgentOutput,
+  type HandoffEntry,
+} from "./handoff.js";
 import chalk from "chalk";
 import fs from "fs-extra";
 import path from "node:path";
@@ -27,6 +34,7 @@ interface AgentExecution {
 
 export class Orchestrator {
   private steps = 0;
+  private handoffLog: HandoffEntry[] = [];
 
   constructor(
     private session: Session,
@@ -36,6 +44,7 @@ export class Orchestrator {
 
   async handleRoute(route: RouteResult): Promise<string[]> {
     this.steps = 0;
+    this.handoffLog = [];
     const lines: string[] = [];
 
     if (route.escalated && route.escalationReason) {
@@ -50,7 +59,12 @@ export class Orchestrator {
       return lines;
     }
 
-    const execution = await this.runAgent(route.targetRole, route.message);
+    const peerHandoffs = this.loadPeerHandoffsFromSession(route.targetRole);
+    const execution = await this.runAgent(
+      route.targetRole,
+      route.message,
+      peerHandoffs || undefined,
+    );
     lines.push(...this.formatOutput(execution));
 
     if (execution.output.type === "patch") {
@@ -116,10 +130,26 @@ export class Orchestrator {
       }
     }
 
-    this.store.updateSessionSummary(
-      this.session.id,
-      this.buildSessionSummary(plan, message),
-    );
+    const sessionSummary = this.buildSessionSummary(plan, message);
+    this.store.updateSessionSummary(this.session.id, sessionSummary);
+    if (this.session.config.memory?.enabled !== false) {
+      const maxEntries =
+        this.session.config.memory?.maxEntriesPerProject ?? 200;
+      this.store.appendProjectMemory(
+        this.session.root,
+        {
+          kind: "summary",
+          content: sessionSummary,
+          sourceSessionId: this.session.id,
+          sourceAgent: "techLead",
+        },
+        maxEntries,
+      );
+    }
+
+    if (this.handoffLog.length) {
+      this.store.saveSessionHandoffs(this.session.id, this.handoffLog);
+    }
 
     return lines;
   }
@@ -127,12 +157,15 @@ export class Orchestrator {
   private async runAgent(
     role: AgentRole,
     message: string,
+    handoffOverride?: string,
   ): Promise<AgentExecution> {
     const agent = this.registry.get(role);
     const scope = getAgentScopes()[role];
     validateStacks(scope, this.session.profile.stacks);
 
-    const input = this.buildInput(message);
+    const handoffBlock =
+      handoffOverride ?? formatHandoffBlock(this.handoffLog);
+    const input = this.buildInput(message, handoffBlock || undefined);
     const output = await agent.run(input);
 
     this.store.saveMessage(this.session.id, "user", message, role);
@@ -143,12 +176,50 @@ export class Orchestrator {
       output.agentId,
     );
 
+    this.captureProjectMemory(output);
+    this.handoffLog.push(handoffFromAgentOutput(output));
+
     const artifactPath = this.writeAgentArtifact(role, message, output);
     return { output, artifactPath };
   }
 
-  private buildInput(message: string): AgentInput {
+  private loadPeerHandoffsFromSession(excludeRole?: AgentRole): string {
+    const messages = this.store
+      .getMessages(this.session.id, 100)
+      .filter((m) => m.role === "assistant")
+      .slice(-3);
+    const entries: HandoffEntry[] = [];
+    for (const m of messages) {
+      try {
+        const output = JSON.parse(m.content) as AgentOutput;
+        if (excludeRole && output.agentId === excludeRole) continue;
+        entries.push(handoffFromAgentOutput(output));
+      } catch {
+        // skip non-JSON assistant messages
+      }
+    }
+    return formatHandoffBlock(entries);
+  }
+
+  private captureProjectMemory(output: AgentOutput): void {
+    if (this.session.config.memory?.enabled === false) return;
+
+    const maxEntries =
+      this.session.config.memory?.maxEntriesPerProject ?? 200;
+
+    for (const entry of extractMemoryEntries(output)) {
+      this.store.appendProjectMemory(this.session.root, {
+        ...entry,
+        sourceSessionId: this.session.id,
+      }, maxEntries);
+    }
+  }
+
+  private buildInput(message: string, agentHandoffs?: string): AgentInput {
     const memorySummary = this.store.getSessionSummary(this.session.id);
+    const projectEntries = this.store.getProjectMemories(this.session.root, 40);
+    const projectMemory = formatProjectMemoryBlock(projectEntries);
+
     const recent = this.store
       .getMessages(this.session.id, 10)
       .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
@@ -165,6 +236,8 @@ export class Orchestrator {
       message,
       profile: this.session.profile,
       config: this.session.config,
+      projectMemory: projectMemory || undefined,
+      agentHandoffs,
       conversationSummary,
     };
   }

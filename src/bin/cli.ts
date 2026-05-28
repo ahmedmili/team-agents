@@ -10,6 +10,14 @@ import { startRepl } from "../cli/repl.js";
 import { registerConfigCommands } from "../cli/config-cli.js";
 import { ensureConfigFile } from "../config/store.js";
 import { startDashboardServer } from "../dashboard/server.js";
+import { projectMemoryLines } from "../cli/commands.js";
+import {
+  getLastActiveWorkspace,
+  listWorkspaces,
+  registerWorkspace,
+} from "../config/workspaces.js";
+import { loadConfig } from "../config/loader.js";
+import { scanRepository } from "../repo/scanner.js";
 
 const program = new Command();
 
@@ -23,11 +31,16 @@ registerConfigCommands(program);
 program
   .command("connect")
   .description("Connect to project and start interactive shell")
-  .option("-C, --cwd <path>", "Project directory", process.cwd())
-  .action(async (opts: { cwd: string }) => {
+  .option(
+    "-C, --cwd <path>",
+    "Project directory (default: last active workspace or cwd)",
+  )
+  .action(async (opts: { cwd?: string }) => {
     const store = new MemoryStore();
     try {
-      const root = path.resolve(opts.cwd);
+      const root = path.resolve(
+        opts.cwd ?? getLastActiveWorkspace() ?? process.cwd(),
+      );
       ensureConfigFile(root);
       const session = await Session.create(root, store);
       const runtime = new ReplRuntime(session, store);
@@ -79,6 +92,70 @@ program
           `${row.provider}: calls=${row.calls} errors=${row.errors} avgLatencyMs=${row.avg_latency_ms}`,
         );
       }
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("switch")
+  .description("Register a project workspace and print summary (use /switch in REPL to stay)")
+  .argument("<path>", "Project directory")
+  .action(async (targetPath: string) => {
+    const root = path.resolve(targetPath);
+    try {
+      ensureConfigFile(root);
+      const config = loadConfig(root);
+      const profile = await scanRepository(root);
+      const projectName = config.projectName ?? profile.name;
+      registerWorkspace(root, projectName);
+      console.log(chalk.green(`Registered workspace: ${projectName}`));
+      console.log(chalk.gray(`Root: ${root}`));
+      console.log(chalk.gray(`Stacks: ${profile.stacks.join(", ")}`));
+      console.log(chalk.gray(`Provider: ${config.provider}`));
+      console.log(
+        chalk.gray("\nRun `ai connect` or `/switch` in the REPL to work in this project."),
+      );
+    } catch (err) {
+      console.error(
+        chalk.red(err instanceof Error ? err.message : String(err)),
+      );
+      process.exit(1);
+    }
+  });
+
+program
+  .command("workspaces")
+  .description("List registered project workspaces")
+  .action(() => {
+    const entries = listWorkspaces();
+    if (!entries.length) {
+      console.log(chalk.gray("No workspaces registered. Run `ai connect` or `ai switch <path>`."));
+      return;
+    }
+    console.log(chalk.bold("Workspaces:\n"));
+    for (const w of entries) {
+      console.log(`  ${chalk.cyan(w.name)}`);
+      console.log(chalk.gray(`    ${w.cwd}`));
+      console.log(chalk.gray(`    last opened: ${w.lastOpenedAt.slice(0, 19)}\n`));
+    }
+  });
+
+program
+  .command("memory")
+  .description("List or clear durable project memory for cwd")
+  .option("-C, --cwd <path>", "Project directory", process.cwd())
+  .option("--clear", "Clear all project memory for this cwd")
+  .option("-n, --limit <n>", "Max entries to show", "20")
+  .action((opts: { cwd: string; clear?: boolean; limit: string }) => {
+    const root = path.resolve(opts.cwd);
+    const store = new MemoryStore();
+    try {
+      const lines = projectMemoryLines(store, root, {
+        clear: Boolean(opts.clear),
+        limit: Number(opts.limit) || 20,
+      });
+      for (const line of lines) console.log(line);
     } finally {
       store.close();
     }

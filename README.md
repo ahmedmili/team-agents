@@ -35,8 +35,12 @@ add JWT authentication
 /reject all
 /rollback all
 /status
+/memory
 /artifacts preview
 /sessions
+/workspaces
+/switch ../other-project
+/board
 /agents
 /exit
 ```
@@ -135,6 +139,13 @@ Inside `ai connect`:
 /dashboard
 /metrics
 /history messages
+/memory
+/memory clear
+```
+
+```bash
+ai memory
+ai memory --clear
 ```
 
 Do not commit real keys to git. Add `.ai-shell.json` to `.gitignore` if it contains secrets.
@@ -210,8 +221,11 @@ See [project.md](project.md) for vision, agent schemas, and Phase 1 scope.
 - Per-agent Markdown reports (`.ai-shell/agents/<session-id>/`) — `/artifacts`
 - Default backend → qa → architect pipeline when Tech Lead returns no tasks
 - Plan task lifecycle (`pending` / `done`) persisted in SQLite
-- Session memory summary injected into later prompts (Phase 2 starter)
-- `/sessions` for multi-project session list (`ai connect -C <path>` to switch)
+- Project memory engine (repo-scoped, cross-session) — `/memory`, `ai memory`
+- Session memory summary injected into later prompts
+- Multi-project workspaces — `/switch`, `/workspaces`, `ai switch`, `ai workspaces`; `ai connect` resumes last active project
+- Agent handoffs in orchestrated flows — `/board` for plan + handoff log
+- `/sessions` for SQLite session history across projects
 - Repo scanner and stack detection
 - SQLite session memory (7-day resume)
 - OpenAI, Anthropic, Hugging Face, OpenRouter, experimental Puter proxy, and mock providers

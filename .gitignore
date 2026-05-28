@@ -7,6 +7,5 @@ dist/
 .DS_Store
 coverage/
 .ai-shell/
-# Uncomment if .ai-shell.json contains API keys:
-# .ai-shell.json
+.ai-shell.json
 *.log

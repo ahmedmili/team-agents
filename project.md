@@ -236,9 +236,9 @@ Phase 1
 CLI AI engineering assistant
 diff-based editing system
 Phase 2
-@agent communication system
-project memory engine
-multi-project support
+@agent communication system (done — cumulative handoffs, `/board`)
+project memory engine (done)
+multi-project support (done — `/switch`, `/workspaces`, `ai switch`, `ai workspaces`, last-active connect)
 Phase 3
 MCP tool integration (GitHub, Jira, etc.)
 autonomous PR creation
@@ -447,7 +447,8 @@ Provider resolution:
 | Structured outputs (Zod) + schema hints in prompts | Done |
 | Default task pipeline when plan is empty | Done |
 | Plan task `done` status + SQLite `session_state` | Done |
-| Session memory summary (Phase 2 starter) | Done |
+| Project memory engine (repo-scoped, cross-session) | Done |
+| Session memory summary (per-session rollup) | Done |
 | Agent Markdown artifacts | Done |
 | Local dashboard + provider telemetry | Done (beyond original Phase 1 non-goals) |
 | MCP / autonomous PR / custom agents / Ollama | Not started (non-goals) |
@@ -463,9 +464,64 @@ In the REPL:
 - `/artifacts` — list files for the current session
 - `/artifacts preview` — show the latest artifact body
 
-### Session memory (Phase 2 starter)
+### Project memory engine (Phase 2)
 
-After an orchestrated flow, a short **session memory summary** is stored in SQLite (`session_state.memory_summary`) and injected into later agent prompts. View with `/status`.
+Durable memory is stored per **project root** (`cwd`) in SQLite table `project_memory`, separate from per-session rollups.
+
+**Kinds:** `summary` | `decision` | `finding` | `convention` | `question`
+
+Captured automatically after each agent run (rule-based, no extra LLM call). Injected into prompts as `[Project memory — prior sessions]` before recent messages.
+
+**Config** (`.ai-shell.json`):
+
+```json
+"memory": {
+  "enabled": true,
+  "maxEntriesPerProject": 200
+}
+```
+
+**Commands:**
+
+- `/memory` — list entries for current project
+- `/memory clear` — wipe project memory for current repo
+- `ai memory` / `ai memory --clear` — same outside the REPL
+- `/status` — entry count + latest line
+
+Dashboard: `GET /api/memory` (also shown on History page).
+
+**vs agent artifacts:** `.ai-shell/agents/<session>/` are full per-run reports; `project_memory` is structured, deduplicated facts across sessions.
+
+### @agent communication (Phase 2)
+
+During orchestrated runs, each agent receives a capped markdown block of prior agents’ outputs in the same flow (`AgentInput.agentHandoffs`). Direct `@agent` routes load the last three assistant JSON outputs from the session as peer context.
+
+**Persistence:** `session_state.handoff_json` — array of `{ agent, type, brief, at }`.
+
+**Commands:**
+
+- `/board` — active plan tasks + handoff log; use `/artifacts` for full reports
+
+### Multi-project workspaces (Phase 2)
+
+Registry file: `~/.ai-shell/workspaces.json` (`lastActive` + pinned projects).
+
+**CLI:**
+
+- `ai connect` — defaults to last active workspace (or cwd); `-C` overrides
+- `ai switch <path>` — register project and print summary (exits)
+- `ai workspaces` — list registry
+
+**REPL:**
+
+- `/switch <path>` — hot reload session without exiting
+- `/workspaces` — list pinned projects (`/sessions` remains SQLite session history)
+
+Dashboard: `GET /api/workspaces`.
+
+### Session memory (rollup)
+
+After an orchestrated flow, a short **session memory summary** is also stored in `session_state.memory_summary` for the active session.
 
 ### REPL commands (extended)
 
@@ -474,7 +530,11 @@ After an orchestrated flow, a short **session memory summary** is stored in SQLi
 | `/connect` | Refresh repo scan (start session with `ai connect`) |
 | `/reject [id\|all]` | Mark pending patches as rejected |
 | `/artifacts [preview]` | List or preview agent `.md` reports |
-| `/sessions` | List recent projects; switch with `ai connect -C <path>` |
+| `/memory [clear]` | Project memory for this repo |
+| `/sessions` | Recent SQLite sessions across projects |
+| `/workspaces` | Pinned workspace registry |
+| `/switch <path>` | Hot-switch project in REPL |
+| `/board` | Plan tasks + agent handoff log |
 | `/dashboard`, `/metrics`, `/history` | Observability |
 
 ### Local dashboard (not cloud SaaS)

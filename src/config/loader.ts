@@ -56,6 +56,11 @@ export function loadConfig(projectRoot: string): AiShellConfig {
     },
     agents,
     maxSteps,
+    memory: {
+      enabled: fileConfig.memory?.enabled ?? true,
+      maxEntriesPerProject:
+        fileConfig.memory?.maxEntriesPerProject ?? 200,
+    },
   };
 }
 

@@ -78,6 +78,10 @@ export function ensureConfigFile(projectRoot: string): AiShellConfig {
         lead: "techLead",
       },
       maxSteps: 5,
+      memory: {
+        enabled: true,
+        maxEntriesPerProject: 200,
+      },
     };
     writeConfigFile(projectRoot, initial);
     return initial;
